@@ -1,0 +1,7 @@
+.zcache
+build
+*.swp
+*~
+.*~
+target
+*.iso
