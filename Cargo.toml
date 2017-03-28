@@ -8,6 +8,7 @@ crate-type = ["staticlib"]
 
 [dependencies]
 rlibc = "1.0.*"
+multiboot2 = "0.3.*"
 
 # The development profile, used for `cargo build`.
 [profile.dev]

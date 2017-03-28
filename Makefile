@@ -12,6 +12,7 @@ print-%: ; @echo $* = $($*)
 
 $(kernel): $(ldscript) $(kern_objs) $(rust_core)
 	@mkdir -p $(@D)
+	@cargo build --target=$(arch)-unknown-linux-gnu
 	ld -n -nostdlib -gc-sections -T $(ldscript)  -o $@ $(kern_objs) $(rust_core)
 
 build/%.o: %.asm

@@ -1,32 +1,33 @@
 #![feature(lang_items)]
+#![feature(const_fn)]
+#![feature(unique)]
 #![no_std]
 
 extern crate rlibc;
+extern crate multiboot2;
 
-pub extern fn display(msg: &str, col: isize, row: isize) {
-    let vga;
-    unsafe {
-        vga = 0xb8000 as *mut u8;
-        for (i, b) in msg.bytes().enumerate() {
-            let off = (row * 80 + col + i as isize) * 2;
-            *vga.offset(off) = b;
-            *vga.offset(off+1) = 0x4f;
-        }
-    }
-}
+mod kern;
 
-pub extern fn clear() {
-    let vga = 0xb8000 as *mut _;
-    let blank = [0_u8; 80 * 24 * 2];
-    unsafe { *vga = blank; }
-}
+use kern::console as con;
+use core::fmt::Write;
 
 #[no_mangle]
-pub extern fn kernel_main() {
-    clear();
-    display("Loading sos2....", 30, 10);
-    display("M", 79, 24);
-    loop {}
+pub extern fn kernel_main(mb2_header: usize) {
+    con::clear();
+    con::display("Loading sos2....", 30, 10);
+    con::display("TM", 78, 24);
+
+    unsafe { 
+        write!(con::tty1, "Loading SOS2....\n");
+        write!(con::tty1, "aofos nofanfons noaf ndosfn anf osafnosafn as oo\n");
+        write!(con::tty1, "{}", "12.3");
+        writeln!(con::tty1, "current time {} + {} = {}", 12, 34, 12 + 34);
+        for i in 1..24 {
+            writeln!(con::tty1, "#{}", i);
+        }
+    }
+    let mbinfo = unsafe { multiboot2::load(mb2_header) };
+
 }
 
 #[lang = "eh_personality"]

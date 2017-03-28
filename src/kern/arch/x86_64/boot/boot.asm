@@ -40,6 +40,8 @@ early_start:
 	call enter_long_mode
 
 	lgdt [early_gdt_pointer]
+
+	pop ebx
 	; when I switch to higher-half address kernel base, this should be changed 
 	; into a indirect jump
 	jmp CODE_SELECTOR:long_mode_start
@@ -202,5 +204,5 @@ early_pd_base:
 
 section .early_stack nobits
 _kern_stack:
-    resb 4096
+    times 4 resb 4096
 kern_stack_top:

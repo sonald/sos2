@@ -14,6 +14,7 @@ long_mode_start:
 
 	mov qword [0xb8000], 0x4f204f204f4d4f4c ;LM
 
+	mov edi, ebx
 	call kernel_main
 
 	hlt
