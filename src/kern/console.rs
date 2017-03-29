@@ -1,8 +1,8 @@
 use core::ptr;
 use core::mem::size_of_val;
-use core::ptr::Unique;
-use core::ptr::write_volatile;
+use core::ptr::{Unique, write_volatile};
 use core::fmt::{Write, Result};
+use spin::Mutex;
 
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
@@ -224,4 +224,4 @@ pub extern fn clear() {
 }
 
 #[warn(non_upper_case_globals)]
-pub static mut tty1: Console = Console::new();
+pub static tty1: Mutex<Console> = Mutex::new(Console::new());

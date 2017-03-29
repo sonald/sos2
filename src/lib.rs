@@ -5,6 +5,7 @@
 
 extern crate rlibc;
 extern crate multiboot2;
+extern crate spin;
 
 mod kern;
 
@@ -22,16 +23,14 @@ pub extern fn kernel_main(mb2_header: usize) {
     con::display("Loading sos2....", 30, 10);
     con::display("TM", 78, 24);
 
-    unsafe { 
-        write!(con::tty1, "Loading SOS2....\n");
-        write!(con::tty1, "aofos nofanfons noaf ndosfn anf osafnosafn as oo\n");
-        write!(con::tty1, "{}", "12.3");
-        writeln!(con::tty1, "current time {} + {} = {}", 12, 34, 12 + 34);
-        for i in 1..24 {
-            writeln!(con::tty1, "#{} \t{} \t{}", i, i, i);
-            busy_wait();
-        }
+    for i in 1..24 {
+        writeln!(con::tty1.lock(), "#{} \t{} \t{}", i, i, i).unwrap();
+        busy_wait();
     }
+    write!(con::tty1.lock(), "Loading SOS2....\n").unwrap();
+    write!(con::tty1.lock(), "aofos nofanfons noaf ndosfn anf osafnosafn as oo\n").unwrap();
+    write!(con::tty1.lock(), "{}", 12.3 / 2.45).unwrap();
+    writeln!(con::tty1.lock(), "current time {} + {} = {}", 12, 34, 12 + 34).unwrap();
     let mbinfo = unsafe { multiboot2::load(mb2_header) };
 
 }
