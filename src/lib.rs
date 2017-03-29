@@ -7,10 +7,12 @@ extern crate rlibc;
 extern crate multiboot2;
 extern crate spin;
 
+#[macro_use]
 mod kern;
 
 use kern::console as con;
 use core::fmt::Write;
+use con::LogLevel::*;
 
 fn busy_wait () {
     for i in 1..500000 {
@@ -20,17 +22,17 @@ fn busy_wait () {
 #[no_mangle]
 pub extern fn kernel_main(mb2_header: usize) {
     con::clear();
-    con::display("Loading sos2....", 30, 10);
-    con::display("TM", 78, 24);
 
     for i in 1..24 {
         writeln!(con::tty1.lock(), "#{} \t{} \t{}", i, i, i).unwrap();
-        busy_wait();
+        //busy_wait();
     }
-    write!(con::tty1.lock(), "Loading SOS2....\n").unwrap();
-    write!(con::tty1.lock(), "aofos nofanfons noaf ndosfn anf osafnosafn as oo\n").unwrap();
-    write!(con::tty1.lock(), "{}", 12.3 / 2.45).unwrap();
-    writeln!(con::tty1.lock(), "current time {} + {} = {}", 12, 34, 12 + 34).unwrap();
+    printk!(Info, "Loading SOS2....\n");
+    printk!(Debug, "values: {}, {}, {}\n", "hello", 12 / 5, 12.34 / 3.145);
+    printk!(Debug, "{}\n", {println!("inner"); "outer"});
+    printk!(Warn, "kernel log\n");
+    printk!(Critical, "kernel log\n");
+
     let mbinfo = unsafe { multiboot2::load(mb2_header) };
 
 }

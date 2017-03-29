@@ -30,7 +30,7 @@ pub enum Color {
 pub struct Attribute(u8);
 
 impl Attribute {
-    const fn new(fg: Color, bg: Color) -> Attribute {
+    pub const fn new(fg: Color, bg: Color) -> Attribute {
         Attribute(((bg as u8) << 4) | (fg as u8))
     }
 }
@@ -74,6 +74,32 @@ impl Console {
             attr: Attribute::new(Color::White, Color::Black),
         }
     }
+
+    pub fn set_attr(&mut self, val: Attribute) -> Attribute {
+        let old = self.attr;
+        self.attr = val;
+        old
+    }
+
+    pub fn get_attr(&self) -> Attribute {
+        self.attr
+    }
+
+    pub fn clear(&mut self) {
+        let blank_line = [Char {
+            ascii: b' ',
+            attr: Attribute::new(Color::White, Color::Black)
+        }; CONSOLE_WIDTH];
+
+        unsafe {
+            let data = (&mut self.buf.get_mut().data).as_mut_ptr();
+            for off in 0..CONSOLE_HEIGHT {
+                ptr::copy_nonoverlapping((&blank_line).as_ptr(),
+                    data.offset((off * CONSOLE_WIDTH) as isize), size_of_val(&blank_line));
+            }
+        }
+    }
+
 
     /// move cursor forward by one and do correct scrolling up
     /// return old cursor
@@ -205,7 +231,8 @@ impl Write for Console {
     }
 }
 
-pub extern fn display(msg: &str, col: isize, row: isize) {
+/// obsolete
+extern fn display(msg: &str, col: isize, row: isize) {
     let vga;
     unsafe {
         vga = 0xb8000 as *mut u8;
@@ -217,11 +244,56 @@ pub extern fn display(msg: &str, col: isize, row: isize) {
     }
 }
 
-pub extern fn clear() {
-    let vga = 0xb8000 as *mut _;
-    let blank = [0_u8; 80 * 24 * 2];
-    unsafe { *vga = blank; }
-}
-
 #[warn(non_upper_case_globals)]
 pub static tty1: Mutex<Console> = Mutex::new(Console::new());
+
+macro_rules! println {
+    ($fmt:expr) => (print!(concat!($fmt, "\n")));
+    ($fmt:expr, $($arg:tt)*) => (print!(concat!($fmt, "\n"), $($arg)*));
+}
+
+macro_rules! print {
+    ($($arg:tt)*) => ({
+        $crate::kern::console::_print(format_args!($($arg)*)).unwrap();
+    });
+}
+
+pub fn _print(args: ::core::fmt::Arguments) -> ::core::fmt::Result {
+    use core::fmt::Write;
+    let mut con = tty1.lock();
+    con.write_fmt(args)
+}
+
+pub enum LogLevel {
+    Debug,
+    Info,
+    Warn,
+    Critical
+}
+
+macro_rules! printk {
+    ($lv:expr, $($arg:tt)*) => ({
+        use $crate::kern::console::*;
+        let old_attr = {
+            let mut con = tty1.lock();
+            let attr = match $lv {
+                LogLevel::Debug => Attribute::new(Color::Green, Color::Black),
+                LogLevel::Info => Attribute::new(Color::Blue, Color::Black),
+                LogLevel::Warn => Attribute::new(Color::Red, Color::Black),
+                LogLevel::Critical => Attribute::new(Color::LightRed, Color::White),
+            };
+            con.set_attr(attr)
+        };
+        print!( $($arg)* );
+        {
+            let mut con = tty1.lock();
+            con.set_attr(old_attr);
+        }
+    });
+}
+
+pub fn clear() {
+    let mut con = tty1.lock();
+    con.clear();
+}
+
