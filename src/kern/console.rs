@@ -1,3 +1,5 @@
+use core::ptr;
+use core::mem::size_of_val;
 use core::ptr::Unique;
 use core::ptr::write_volatile;
 use core::fmt::{Write, Result};
@@ -114,6 +116,24 @@ impl Console {
     }
 
     fn scroll_up(&mut self) {
+        let (cy, cx) = extract_cursor(self.cursor);
+        let blank_line = [Char {
+            ascii: b' ',
+            attr: Attribute::new(Color::White, Color::Black)
+        }; CONSOLE_WIDTH];
+        let off = CONSOLE_WIDTH * (CONSOLE_HEIGHT - 1);
+
+
+        if cy < CONSOLE_HEIGHT - 1 {
+            return;
+        }
+
+        unsafe {
+            let data = (&mut self.buf.get_mut().data).as_mut_ptr();
+            ptr::copy(data.offset(CONSOLE_WIDTH as isize), data, off);
+            ptr::copy_nonoverlapping((&blank_line).as_ptr(),
+                data.offset(off as isize), size_of_val(&blank_line));
+        }
     }
 
     pub fn write_byte(&mut self, byte: u8) {
@@ -129,7 +149,6 @@ impl Console {
                     unsafe {
                         let p = &mut self.buf.get_mut().data[self.cursor];
                         write_volatile(p, blank);
-                        //self.buf.get_mut().data[self.cursor] = blank;
                     }
                     self.retreat();
                 }
@@ -142,12 +161,6 @@ impl Console {
 
                 let old = self.cursor;
                 self.cursor = contract_cursor(cy, cx);
-                //unsafe {
-                    //let data = &mut self.buf.get_mut().data;
-                    //for i in old..self.cursor {
-                        //data[i] = blank;
-                    //}
-                //}
                 unsafe {
                     let data = (&mut self.buf.get_mut().data).as_mut_ptr();
                     for i in old..self.cursor {
@@ -169,13 +182,12 @@ impl Console {
                 self.cursor = contract_cursor(cy, cx);
             }, 
             _ => {
-                if (self.cursor >= CONSOLE_WIDTH * CONSOLE_HEIGHT) {
+                if self.cursor >= CONSOLE_WIDTH * CONSOLE_HEIGHT {
                     return;
                 }
                 unsafe {
                     let p = &mut self.buf.get_mut().data[self.cursor];
                     write_volatile(p, Char {ascii: byte, attr: self.attr});
-                    //self.buf.get_mut().data[self.cursor] = Char {ascii: byte, attr: self.attr};
                 }
                 self.advance();
             }

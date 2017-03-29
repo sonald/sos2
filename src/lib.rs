@@ -11,6 +11,11 @@ mod kern;
 use kern::console as con;
 use core::fmt::Write;
 
+fn busy_wait () {
+    for i in 1..500000 {
+    }
+}
+
 #[no_mangle]
 pub extern fn kernel_main(mb2_header: usize) {
     con::clear();
@@ -23,7 +28,8 @@ pub extern fn kernel_main(mb2_header: usize) {
         write!(con::tty1, "{}", "12.3");
         writeln!(con::tty1, "current time {} + {} = {}", 12, 34, 12 + 34);
         for i in 1..24 {
-            writeln!(con::tty1, "#{}", i);
+            writeln!(con::tty1, "#{} \t{} \t{}", i, i, i);
+            busy_wait();
         }
     }
     let mbinfo = unsafe { multiboot2::load(mb2_header) };
