@@ -6,17 +6,16 @@ mboot:
 	dd 0					; i386 PM
 	dd mboot_end - mboot
 	dd 0x100000000 - (MBOOT2_MAGIC + 0 + (mboot_end - mboot))
+	align 8
 
 	; tags
-;framebuffer_tag:
-	;dw 5
-	;dw 1
-	;dd 20
-	;dd 1024
-	;dd 768
-	;dd 32
-	;dd 0  ; pad 8 byte align
-
+	dw 5
+	dw 0
+	dd 20
+	dd 800
+	dd 600
+	dd 32
+	align 8
 
 	dw 0, 0, 8
 mboot_end:
@@ -60,6 +59,23 @@ setup_early_pages:
 	inc ecx
 	cmp ecx, 512
 	jne .loop
+
+	;; map 0xfd000000 + 24M (12 x 2M-page) area for framebuffer usage
+	mov ecx, 3
+	mov eax, early_pd_base + 3 * 8 + 0x3
+	mov [early_pdp_base + ecx * 8], eax
+
+	;mov ecx, 488
+	mov ecx, 0
+.loop2:
+	mov eax, (1<<21)
+	mul ecx
+	add eax, 0xfd000000
+	or eax, 0x83
+	mov [early_pd_base + ecx * 8 + 3904], eax
+	inc ecx
+	cmp ecx, 12
+	jne .loop2
 	ret
 
 enter_long_mode:

@@ -25,27 +25,61 @@ fn busy_wait () {
 #[allow(dead_code)]
 fn print_test() {
     for i in 1..24 {
-        printk!(Info, "#{} \t{} \t{}\n", i, i, i);
+        printk!(Info, "#{} \t{} \t{}\n\r", i, i, i);
         busy_wait();
     }
-    printk!(Info, "Loading SOS2....\n");
-    printk!(Debug, "values: {}, {}, {}\n", "hello", 12 / 5, 12.34 / 3.145);
-    printk!(Debug, "{}\n", {println!("inner"); "outer"});
-    printk!(Warn, "kernel log\n");
-    printk!(Critical, "kernel log\n");
 
+    printk!(Debug, "values: {}, {}, {}\n\r", "hello", 12 / 5, 12.34 / 3.145);
+    printk!(Debug, "{}\n\r", {println!("inner"); "outer"});
+    printk!(Warn, "kernel log\n\r");
+    printk!(Critical, "kernel log\n\r");
+}
+
+pub fn display(fb: &multiboot2::FramebufferTag) {
+    use core::ptr::*;
+    use core::mem::size_of_val;
+    let vga;
+    unsafe {
+        vga = fb.addr as *mut u32;
+        let mut clr: u32 = 0;
+        let data = [clr; 800];
+
+        for k in 0..100 {
+            for i in 0..fb.height {
+                let off = i * fb.width;
+                copy_nonoverlapping((&data).as_ptr(),
+                    vga.offset(off as isize), size_of_val(&data));
+
+                //for j in 0..fb.width {
+                //let off = i * fb.width + j;
+                //*vga.offset(off as isize) = clr;
+                //}
+            }
+
+            clr += 0x00ffffff / 100;
+            busy_wait();
+        }
+    }
 }
 
 #[no_mangle]
 pub extern fn kernel_main(mb2_header: usize) {
+    unsafe { serial::init_serial(); }
+
     con::clear();
-    printk!(Info, "Loading SOS2....\n");
+    printk!(Info, "Loading SOS2....\n\r");
 
     let mbinfo = unsafe { multiboot2::load(mb2_header) };
 
-    unsafe { serial::init_serial(); }
-    for a in "Loading SOS2....\n\r".bytes() {
-        unsafe { serial::write_serial(a) };
+    if let Some(mmap) = mbinfo.memory_map_tag() {
+        for (i, a) in mmap.memory_areas().enumerate() {
+            printk!(Info, "#{}: {:?}\n\r", i, a);
+        }
+    }
+
+    if let Some(fb) = mbinfo.framebuffer_tag() {
+        printk!(Debug, "fb: {:?}\n\r", fb);
+        display(&fb);
     }
 }
 

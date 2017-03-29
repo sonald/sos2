@@ -1,4 +1,3 @@
-
 use kern::arch::io::{outb, inb};
 const SERIAL_PORT: u16 = 0x3f8;   /* COM1 */
 
@@ -14,12 +13,24 @@ pub unsafe fn init_serial() {
  
  
 pub unsafe fn write_serial(a: u8) {
-    unsafe fn is_transmit_empty() -> u8 {
-        return inb(SERIAL_PORT + 5) & 0x20;
+    unsafe fn is_transmit_empty() -> bool {
+        inb(SERIAL_PORT + 5) & 0x20 != 0
     }
 
-    while is_transmit_empty() == 0 {
+    while !is_transmit_empty() {
     }
 
     outb(SERIAL_PORT, a);
+}
+
+ 
+pub unsafe fn read_serial() -> u8 {
+    unsafe fn serial_received() -> bool {
+        inb(SERIAL_PORT + 5) & 1 != 0
+    }
+
+    while !serial_received() {
+    }
+
+    inb(SERIAL_PORT)
 }

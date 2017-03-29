@@ -2,7 +2,7 @@
 name = "sos2"
 version = "0.1.0"
 dependencies = [
- "multiboot2 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "multiboot2 0.3.2 (git+https://github.com/sonald/multiboot2-elf64)",
  "rlibc 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "spin 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -15,7 +15,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "multiboot2"
 version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+source = "git+https://github.com/sonald/multiboot2-elf64#af90224aa39a352d23572d44047d16f9a9156478"
 dependencies = [
  "bitflags 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -32,6 +32,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [metadata]
 "checksum bitflags 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "8dead7461c1127cf637931a1e50934eb6eee8bff2f74433ac7909e9afcee04a3"
-"checksum multiboot2 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)" = "dcea5906310f2607ea39a42b8af0745dc487d7583db9d981142a63b538647f69"
+"checksum multiboot2 0.3.2 (git+https://github.com/sonald/multiboot2-elf64)" = "<none>"
 "checksum rlibc 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)" = "fc874b127765f014d792f16763a81245ab80500e2ad921ed4ee9e82481ee08fe"
 "checksum spin 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)" = "1d16a26e2b789f86aabddbe91cb82ee2e822beb8a59840d631941b625ef77e53"

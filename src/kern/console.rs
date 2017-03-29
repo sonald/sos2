@@ -222,10 +222,12 @@ impl Console {
 }
 
 
+use kern::driver::serial;
 impl Write for Console {
     fn write_str(&mut self, s: &str) -> Result {
         for b in s.bytes() {
             self.write_byte(b);
+            unsafe { serial::write_serial(b) };
         }
         Ok(())
     }
@@ -281,7 +283,7 @@ macro_rules! printk {
             let attr = match $lv {
                 LogLevel::Debug => Attribute::new(Color::Green, Color::Black),
                 LogLevel::Normal => Attribute::new(Color::White, Color::Black),
-                LogLevel::Info => Attribute::new(Color::Magenta, Color::Black),
+                LogLevel::Info => Attribute::new(Color::Cyan, Color::Black),
                 LogLevel::Warn => Attribute::new(Color::Red, Color::Black),
                 LogLevel::Critical => Attribute::new(Color::LightRed, Color::White),
             };
