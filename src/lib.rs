@@ -39,24 +39,22 @@ pub fn display(fb: &multiboot2::FramebufferTag) {
     use core::ptr::*;
     use core::mem::size_of_val;
     let vga;
+
     unsafe {
         vga = fb.addr as *mut u32;
         let mut clr: u32 = 0;
-        let data = [clr; 800];
 
-        for k in 0..100 {
+        for _ in 0..100 {
             for i in 0..fb.height {
+                let data = &[clr; 800];
                 let off = i * fb.width;
-                copy_nonoverlapping((&data).as_ptr(),
-                    vga.offset(off as isize), size_of_val(&data));
-
-                //for j in 0..fb.width {
-                //let off = i * fb.width + j;
-                //*vga.offset(off as isize) = clr;
-                //}
+                copy_nonoverlapping(data, vga.offset(off as isize) as *mut _, 1);
+                clr += 1;
+                if clr > 0x00ffffff {
+                    clr = 0;
+                }
             }
 
-            clr += 0x00ffffff / 100;
             busy_wait();
         }
     }
