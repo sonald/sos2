@@ -65,7 +65,6 @@ setup_early_pages:
 	mov eax, early_pd_base + 3 * 8 + 0x3
 	mov [early_pdp_base + ecx * 8], eax
 
-	;mov ecx, 488
 	mov ecx, 0
 .loop2:
 	mov eax, (1<<21)

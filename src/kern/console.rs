@@ -157,8 +157,7 @@ impl Console {
         unsafe {
             let data = (&mut self.buf.get_mut().data).as_mut_ptr();
             ptr::copy(data.offset(CONSOLE_WIDTH as isize), data, off);
-            ptr::copy_nonoverlapping((&blank_line).as_ptr(),
-                data.offset(off as isize), size_of_val(&blank_line));
+            ptr::copy_nonoverlapping(&blank_line, data.offset(off as isize) as *mut _, 1);
         }
     }
 
