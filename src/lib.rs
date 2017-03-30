@@ -12,8 +12,8 @@ extern crate spin;
 mod kern;
 
 use kern::console as con;
-use core::fmt::Write;
 use con::LogLevel::*;
+use kern::driver::serial;
 
 #[allow(dead_code)]
 fn busy_wait () {
@@ -43,6 +43,10 @@ pub extern fn kernel_main(mb2_header: usize) {
 
     let mbinfo = unsafe { multiboot2::load(mb2_header) };
 
+    unsafe { serial::init_serial(); }
+    for a in "Loading SOS2....\n\r".bytes() {
+        unsafe { serial::write_serial(a) };
+    }
 }
 
 #[lang = "eh_personality"]
