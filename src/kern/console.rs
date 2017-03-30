@@ -142,7 +142,7 @@ impl Console {
     }
 
     fn scroll_up(&mut self) {
-        let (cy, cx) = extract_cursor(self.cursor);
+        let (cy, _) = extract_cursor(self.cursor);
         let blank_line = [Char {
             ascii: b' ',
             attr: Attribute::new(Color::White, Color::Black)
@@ -232,6 +232,7 @@ impl Write for Console {
 }
 
 /// obsolete
+#[allow(dead_code)]
 extern fn display(msg: &str, col: isize, row: isize) {
     let vga;
     unsafe {
@@ -244,7 +245,7 @@ extern fn display(msg: &str, col: isize, row: isize) {
     }
 }
 
-#[warn(non_upper_case_globals)]
+#[allow(non_upper_case_globals)]
 pub static tty1: Mutex<Console> = Mutex::new(Console::new());
 
 macro_rules! println {
@@ -266,6 +267,7 @@ pub fn _print(args: ::core::fmt::Arguments) -> ::core::fmt::Result {
 
 pub enum LogLevel {
     Debug,
+    Normal,
     Info,
     Warn,
     Critical
@@ -278,7 +280,8 @@ macro_rules! printk {
             let mut con = tty1.lock();
             let attr = match $lv {
                 LogLevel::Debug => Attribute::new(Color::Green, Color::Black),
-                LogLevel::Info => Attribute::new(Color::Blue, Color::Black),
+                LogLevel::Normal => Attribute::new(Color::White, Color::Black),
+                LogLevel::Info => Attribute::new(Color::Magenta, Color::Black),
                 LogLevel::Warn => Attribute::new(Color::Red, Color::Black),
                 LogLevel::Critical => Attribute::new(Color::LightRed, Color::White),
             };

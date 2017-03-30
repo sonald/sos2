@@ -1,6 +1,7 @@
 #![feature(lang_items)]
 #![feature(const_fn)]
 #![feature(unique)]
+#![feature(asm)]
 #![no_std]
 
 extern crate rlibc;
@@ -14,24 +15,31 @@ use kern::console as con;
 use core::fmt::Write;
 use con::LogLevel::*;
 
+#[allow(dead_code)]
 fn busy_wait () {
-    for i in 1..500000 {
+    for _ in 1..500000 {
+        kern::util::cpu_relax();
     }
 }
 
-#[no_mangle]
-pub extern fn kernel_main(mb2_header: usize) {
-    con::clear();
-
+#[allow(dead_code)]
+fn print_test() {
     for i in 1..24 {
-        writeln!(con::tty1.lock(), "#{} \t{} \t{}", i, i, i).unwrap();
-        //busy_wait();
+        printk!(Info, "#{} \t{} \t{}\n", i, i, i);
+        busy_wait();
     }
     printk!(Info, "Loading SOS2....\n");
     printk!(Debug, "values: {}, {}, {}\n", "hello", 12 / 5, 12.34 / 3.145);
     printk!(Debug, "{}\n", {println!("inner"); "outer"});
     printk!(Warn, "kernel log\n");
     printk!(Critical, "kernel log\n");
+
+}
+
+#[no_mangle]
+pub extern fn kernel_main(mb2_header: usize) {
+    con::clear();
+    printk!(Info, "Loading SOS2....\n");
 
     let mbinfo = unsafe { multiboot2::load(mb2_header) };
 
