@@ -2,6 +2,7 @@
 #![feature(const_fn)]
 #![feature(unique)]
 #![feature(asm)]
+#![feature(range_contains)]
 #![no_std]
 
 extern crate rlibc;
@@ -14,6 +15,7 @@ mod kern;
 use kern::console as con;
 use con::LogLevel::*;
 use kern::driver::serial;
+use kern::memory::*;
 
 #[allow(dead_code)]
 fn busy_wait () {
@@ -71,25 +73,56 @@ pub extern fn kernel_main(mb2_header: usize) {
     printk!(Info, "Loading SOS2....\n\r");
 
     let mbinfo = unsafe { multiboot2::load(mb2_header) };
+    printk!(Info, "{:?}\n\r", mbinfo);
 
-    if let Some(mmap) = mbinfo.memory_map_tag() {
-        for (i, a) in mmap.memory_areas().enumerate() {
-            printk!(Info, "#{}: {:?}\n\r", i, a);
-        }
-    }
+    let mmap = mbinfo.memory_map_tag().expect("memory map is unavailable");
+    let start = mmap.memory_areas().map(|a| a.base_addr).min().unwrap();
+    let end = mmap.memory_areas().map(|a| a.base_addr + a.length).max().unwrap();
+    printk!(Info, "mmap start: 0x{:x}, end: 0x{:x}\n\r", start ,end);
 
-    if let Some(fb) = mbinfo.framebuffer_tag() {
-        printk!(Debug, "fb: {:?}\n\r", fb);
-        display(&fb);
+    let elf = mbinfo.elf_sections_tag().expect("elf sections is unavailable");
+    let kernel_start = elf.sections().map(|a| a.addr).min().unwrap();
+    let kernel_end = elf.sections().map(|a| a.addr + a.size).max().unwrap();
+    printk!(Info, "kernel start: 0x{:x}, end: 0x{:x}\n\r", kernel_start, kernel_end);
+
+    let (mb_start, mb_end) = (mb2_header, mb2_header + mbinfo.total_size as usize);
+    printk!(Info, "mboot2 start: 0x{:x}, end: 0x{:x}\n\r", mb_start, mb_end);
+
+
+    let fb = mbinfo.framebuffer_tag().expect("framebuffer tag is unavailale");
+    printk!(Debug, "fb: {:?}\n\r", fb);
+    display(&fb);
+
+    use core::ops::Range;
+    let kr = Range {
+        start: Frame::from_paddress(kernel_start as usize),
+        end: Frame::from_paddress(kernel_end as usize - 1) + 1,
+    };
+    let mr = Range {
+        start: Frame::from_paddress(mb_start),
+        end: Frame::from_paddress(mb_end - 1) + 1,
+    };
+    let mut afa = AreaFrameAllocator::new(mmap.memory_areas(), kr, mr);
+    printk!(Debug, "Allocator: \n\r{:?}\n\r", afa);
+
+    let mut i = 0;
+    while let Some(f) = afa.alloc_frame() {
+        //printk!(Warn, "0x{:x}  ", f.number);
+        i += 1;
     }
+    printk!(Warn, "allocated #{} frames\n\r", i);
 }
 
 #[lang = "eh_personality"]
 extern fn eh_personality() {}
 
 #[lang = "panic_fmt"] 
-#[no_mangle] pub extern fn panic_fmt() -> ! {
-    loop {}
+#[no_mangle] pub extern fn panic_fmt(fmt: core::fmt::Arguments, file: &'static str, line: u32) -> ! {
+	printk!(Critical, "\n\rPanic at {}:{}\n\r", file, line);
+    printk!(Critical, "    {}\n\r", fmt);
+    loop {
+        unsafe { asm!("hlt":::: "volatile"); }
+    }
 }
 
 #[lang = "eh_unwind_resume"]

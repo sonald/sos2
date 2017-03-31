@@ -10,6 +10,7 @@ crate-type = ["staticlib"]
 rlibc = "1.0.*"
 multiboot2 = { git = "https://github.com/sonald/multiboot2-elf64" }
 spin = "0.4.*"
+bitflags = "0.8.*"
 
 # The development profile, used for `cargo build`.
 [profile.dev]

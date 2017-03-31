@@ -6,3 +6,4 @@ pub mod arch;
 pub mod console;
 pub mod util;
 pub mod driver;
+pub mod memory;
