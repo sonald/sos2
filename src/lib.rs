@@ -40,6 +40,9 @@ pub fn display(fb: &multiboot2::FramebufferTag) {
     use core::mem::size_of_val;
     let vga;
 
+    if fb.frame_type != multiboot2::FramebufferType::Rgb {
+        return;
+    }
     unsafe {
         vga = fb.addr as *mut u32;
         let mut clr: u32 = 0;
