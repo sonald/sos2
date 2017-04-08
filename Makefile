@@ -1,4 +1,5 @@
 arch ?= x86_64
+LD = ${HOME}/crossgcc/bin/x86_64-elf-ld
 ldscript := src/kern/early.lds
 kernel := build/kernel
 kern_srcs := $(wildcard src/kern/arch/$(arch)/boot/*.asm)
@@ -13,7 +14,7 @@ print-%: ; @echo $* = $($*)
 $(kernel): $(ldscript) $(kern_objs) $(rust_core)
 	@mkdir -p $(@D)
 	@cargo build --target=$(arch)-unknown-linux-gnu
-	ld -n -nostdlib -gc-sections -T $(ldscript)  -o $@ $(kern_objs) $(rust_core)
+	$(LD) -n -nostdlib -gc-sections -T $(ldscript)  -o $@ $(kern_objs) $(rust_core)
 
 build/%.o: %.asm
 	@mkdir -p $(@D)

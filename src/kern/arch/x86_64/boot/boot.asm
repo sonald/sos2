@@ -60,7 +60,7 @@ setup_early_pages:
 	cmp ecx, 512
 	jne .loop
 
-	;; map 0xfd000000 + 24M (12 x 2M-page) area for framebuffer usage
+	;; map 0xfd00_0000 + 24M (12 x 2M-page) area for framebuffer usage
 	mov ecx, 3
 	mov eax, early_pd_base + 3 * 8 + 0x3
 	mov [early_pdp_base + ecx * 8], eax
@@ -75,6 +75,7 @@ setup_early_pages:
 	inc ecx
 	cmp ecx, 12
 	jne .loop2
+
 	ret
 
 enter_long_mode:
@@ -209,13 +210,14 @@ section .data
 align 0x1000
 early_pml4_base:
 	dq early_pdp_base + 0x3 ; S,R/W,P
-	times (0x1000 - 8) db 0
+	times (0x200 - 2) dq 0
+	dq early_pml4_base + 0x3 ; recursive-mapping 511-th entry
 early_pdp_base:
 	dq early_pd_base + 0x3 ; S,R/W,P
-	times (0x1000 - 8) db 0
+	times (0x200 - 1) dq 0
 early_pd_base:
 	dq 0x83 ; S,R/W,P + 2M
-	times (0x1000 - 8) db 0
+	times (0x200 - 1) dq 0
 
 section .early_stack nobits
 _kern_stack:

@@ -1,6 +1,7 @@
-
 use core::ops::{Range, Add, AddAssign};
 use multiboot2::*;
+
+pub mod paging;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Frame {
@@ -29,6 +30,10 @@ pub const PAGE_SIZE: usize = 4096;
 impl Frame {
     pub const fn from_paddress(physical: usize) -> Frame {
         Frame {number: physical / PAGE_SIZE }
+    }
+
+    pub const fn start_address(&self) -> usize {
+        self.number * PAGE_SIZE
     }
 }
 

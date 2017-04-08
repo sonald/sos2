@@ -8,6 +8,7 @@
 extern crate rlibc;
 extern crate multiboot2;
 extern crate spin;
+#[macro_use] extern crate bitflags;
 
 #[macro_use]
 mod kern;
@@ -37,7 +38,8 @@ fn print_test() {
     printk!(Critical, "kernel log\n\r");
 }
 
-pub fn display(fb: &multiboot2::FramebufferTag) {
+/// test rgb framebuffer drawing
+fn display(fb: &multiboot2::FramebufferTag) {
     use core::ptr::*;
     use core::mem::size_of_val;
     let vga;
@@ -63,6 +65,18 @@ pub fn display(fb: &multiboot2::FramebufferTag) {
             busy_wait();
         }
     }
+}
+
+fn test_frame_allocator(afa: &mut AreaFrameAllocator) {
+    printk!(Debug, "Allocator: \n\r{:?}\n\r", afa);
+
+    let mut i = 0;
+    while let Some(f) = afa.alloc_frame() {
+        //printk!(Warn, "0x{:x}  ", f.number);
+        i += 1;
+        if i == 100 { break }
+    }
+    printk!(Warn, "allocated #{} frames\n\r", i);
 }
 
 #[no_mangle]
@@ -103,14 +117,8 @@ pub extern fn kernel_main(mb2_header: usize) {
         end: Frame::from_paddress(mb_end - 1) + 1,
     };
     let mut afa = AreaFrameAllocator::new(mmap.memory_areas(), kr, mr);
-    printk!(Debug, "Allocator: \n\r{:?}\n\r", afa);
-
-    let mut i = 0;
-    while let Some(f) = afa.alloc_frame() {
-        //printk!(Warn, "0x{:x}  ", f.number);
-        i += 1;
-    }
-    printk!(Warn, "allocated #{} frames\n\r", i);
+    test_frame_allocator(&mut afa);
+    paging::test_paging(&mut afa);
 }
 
 #[lang = "eh_personality"]
