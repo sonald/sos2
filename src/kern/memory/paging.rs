@@ -282,9 +282,9 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
             }
 
             let mut flags = PRESENT;
-            //if !sect.flags().contains(ELF_SECTION_EXECUTABLE) {
-                //flags |= NO_EXECUTE;
-            //}
+            if !sect.flags().contains(ELF_SECTION_EXECUTABLE) {
+                flags |= NO_EXECUTE;
+            }
             if sect.flags().contains(ELF_SECTION_WRITABLE) {
                 flags |= WRITABLE;
             }
@@ -336,6 +336,10 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
 
     let old_map = switch(new_map);
     printk!(Info, "switching kernel map from {:?} to {:?}\n\r", old_map, new_map);
+
+    // unmap old pml4 page as kernel stack guard page (boot.asm:early_pml4_base)
+    // so kernel can now use 18KB stack
+    active.unmap(old_map, allocator);
 }
 
 pub fn switch(new_map: InactivePML4Table) -> InactivePML4Table {
@@ -419,6 +423,7 @@ pub fn test_paging_before_remap<A>(allocator: &mut A) where A: FrameAllocator {
         }
 
         pml4.unmap(page, allocator);
+        // this works cause cr0.WP is not set yet
         for p in v2.iter_mut() {
             *p = 3;
         }
@@ -448,15 +453,15 @@ pub fn test_paging_after_remap<A>(allocator: &mut A) where A: FrameAllocator {
         }
 
         let page2 = Page { number: page.number + 100 };
-        pml4.map(page2, USER, allocator);
+        pml4.map(page2, WRITABLE, allocator);
         let mut v2 = unsafe { from_raw_parts_mut(page2.start_address() as *mut u8, 4096) };
         for p in v2.iter_mut() {
             *p = 3;
         }
 
         pml4.unmap(page, allocator);
-        for p in v2.iter_mut() {
-            *p = 3;
-        }
+        //for p in v2.iter_mut() {
+            //*p = 3;
+        //}
     }
 }

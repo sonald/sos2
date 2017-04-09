@@ -1,7 +1,7 @@
 global long_mode_start
 extern kernel_main
 
-section .data
+section .text
 bits 64
 long_mode_start:
 	; clear all other selectors, since they ignored by 64-bit sub-mode
