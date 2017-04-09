@@ -1,4 +1,5 @@
-use super::{Frame, PAGE_SIZE, FrameAllocator};
+use super::frame::{Frame, FrameAllocator};
+use super::PAGE_SIZE;
 #[macro_use] use kern::console as con;
 use con::LogLevel::*;
 
@@ -210,6 +211,20 @@ pub struct ActivePML4Table {
     top: Unique<Table<PML4T>>
 }
 
+use core::ops::{Deref, DerefMut};
+impl Deref for ActivePML4Table {
+    type Target = Table<PML4T>;
+    fn deref(&self) -> &Self::Target {
+        unsafe { self.get() }
+    }
+}
+
+impl DerefMut for ActivePML4Table {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { self.get_mut() }
+    }
+}
+
 impl ActivePML4Table {
     /// pointer to top level table virtual address, only if table is recursive-mapped.
     pub fn new() -> ActivePML4Table {
@@ -229,7 +244,7 @@ impl ActivePML4Table {
     pub fn translate(&self, vaddr: VirtualAddress) -> Option<PhysicalAddress> {
         vaddr.validate();
 
-        let p3 = self.get().next_level_table(vaddr.pml4t_index());
+        let p3 = self.next_level_table(vaddr.pml4t_index());
         let offset = vaddr.offset();
 
         /// return frame for huge page
@@ -272,10 +287,9 @@ impl ActivePML4Table {
     //FIXME: need to check if frame has been used
     pub fn map_to<A>(&mut self, page: Page, frame: Frame, flags: EntryFlags, allocator: &mut A) 
         where A: FrameAllocator {
-        let pml4 = self.get_mut();
         let vaddr = page.start_address() as VirtualAddress;
 
-        let pdpt = pml4.next_level_table_or_create(vaddr.pml4t_index(), allocator);
+        let pdpt = self.next_level_table_or_create(vaddr.pml4t_index(), allocator);
         let pdt = pdpt.next_level_table_or_create(vaddr.pdpt_index(), allocator);
         let pt = pdt.next_level_table_or_create(vaddr.pdt_index(), allocator);
 
@@ -301,7 +315,7 @@ impl ActivePML4Table {
         let vaddr = page.start_address() as VirtualAddress;
         assert!(self.translate(vaddr).is_some());
 
-        let p3 = self.get_mut().next_level_table_mut(vaddr.pml4t_index());
+        let p3 = self.next_level_table_mut(vaddr.pml4t_index());
         let offset = vaddr.offset();
 
         let huge_page = || {None};
@@ -317,17 +331,9 @@ impl ActivePML4Table {
                 ::kern::arch::tlb_flush(vaddr);
                 //TODO: free pdpt, pdt, pt tables when empty
                 //allocator.dealloc_frame(frame);
-                Some({})
+                Some(())
             })
             .or_else(huge_page);
-    }
-}
-
-use core::ops::Deref;
-impl Deref for ActivePML4Table {
-    type Target = Table<PML4T>;
-    fn deref(&self) -> &Self::Target {
-        unsafe { self.get() }
     }
 }
 
@@ -382,7 +388,12 @@ pub fn test_paging<A>(allocator: &mut A) where A: FrameAllocator {
 
         let mut v = unsafe { from_raw_parts_mut(page.start_address() as *mut u8, 4096) };
         for p in v.iter_mut() {
-            *p = 2;
+            *p = 0xBA;
+        }
+
+        printk!(Debug, "read back value {:X}", v[100]);
+        for &p in v.iter() {
+            assert!(p == 0xBA);
         }
 
         let page2 = Page { number: page.number + 100 };
