@@ -1,5 +1,7 @@
 pub mod paging;
 pub mod frame;
+pub mod inactive;
+pub mod mapper;
 
 pub use frame::*;
 

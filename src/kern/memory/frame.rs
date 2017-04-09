@@ -1,4 +1,5 @@
 use core::ops::{Range, Add, AddAssign};
+use core::iter::Iterator;
 use multiboot2::*;
 
 use super::PAGE_SIZE;
@@ -21,6 +22,25 @@ impl AddAssign<isize> for Frame {
             self.number -= (-inc) as usize;
         } else {
             self.number += inc as usize;
+        }
+    }
+}
+
+pub struct FrameRange {
+    pub start: Frame,
+    pub end: Frame // exclusive
+}
+
+impl Iterator for FrameRange {
+    type Item = Frame;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.start < self.end {
+            let f = self.start;
+            self.start += 1;
+            Some(f)
+        } else {
+            None
         }
     }
 }

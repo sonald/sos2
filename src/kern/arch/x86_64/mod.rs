@@ -22,7 +22,7 @@ pub fn cr3() -> PhysicalAddress {
 }
 
 pub unsafe fn cr3_set(paddr: PhysicalAddress) {
-    asm!("mov $0, %cr3"::"r"(paddr));
+    asm!("mov $0, %cr3"::"r"(paddr) : "memory");
 }
 
 /// read page fault address

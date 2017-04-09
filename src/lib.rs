@@ -117,8 +117,15 @@ pub extern fn kernel_main(mb2_header: usize) {
         end: Frame::from_paddress(mb_end - 1) + 1,
     };
     let mut afa = AreaFrameAllocator::new(mmap.memory_areas(), kr, mr);
-    test_frame_allocator(&mut afa);
-    paging::test_paging(&mut afa);
+    {
+        test_frame_allocator(&mut afa);
+        paging::test_paging_before_remap(&mut afa);
+    }
+    paging::remap_the_kernel(&mut afa, &mbinfo);
+    {
+        test_frame_allocator(&mut afa);
+        paging::test_paging_after_remap(&mut afa);
+    }
 }
 
 #[lang = "eh_personality"]

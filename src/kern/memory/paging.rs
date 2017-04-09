@@ -1,7 +1,10 @@
-use super::frame::{Frame, FrameAllocator};
+use frame::{Frame, FrameAllocator, FrameRange};
+use mapper::Mapper;
 use super::PAGE_SIZE;
+use inactive::{InactivePML4Table, TemporaryPage};
 #[macro_use] use kern::console as con;
 use con::LogLevel::*;
+use multiboot2::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Page {
@@ -39,7 +42,7 @@ bitflags! {
 }
 
 const AddressBitsMask: usize = 0x000fffff_fffff000;
-const EntryCount: usize = 512;
+pub const EntryCount: usize = 512;
 
 pub type PhysicalAddress = usize;
 pub type VirtualAddress = usize;
@@ -196,7 +199,7 @@ impl<L> Table<L> where L: HierarchyTableLevel {
 
     pub fn next_level_table_or_create<A>(&mut self, index: usize, allocator: &mut A) 
         -> &mut Table<L::NextLevel> where A: FrameAllocator {
-        if self.next_level_table_mut(index).is_none() {
+        if self.next_level_table(index).is_none() {
             let frame = allocator.alloc_frame().expect("no more free frame available");
             self.entries[index].set(frame, WRITABLE | PRESENT);
             self.next_level_table_mut(index).unwrap().zero()
@@ -208,136 +211,148 @@ impl<L> Table<L> where L: HierarchyTableLevel {
 
 use core::ptr::Unique;
 pub struct ActivePML4Table {
-    top: Unique<Table<PML4T>>
+    mapper: Mapper
 }
 
 use core::ops::{Deref, DerefMut};
 impl Deref for ActivePML4Table {
-    type Target = Table<PML4T>;
+    type Target = Mapper;
     fn deref(&self) -> &Self::Target {
-        unsafe { self.get() }
+        &self.mapper
     }
 }
 
 impl DerefMut for ActivePML4Table {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { self.get_mut() }
+        &mut self.mapper
     }
 }
 
 impl ActivePML4Table {
-    /// pointer to top level table virtual address, only if table is recursive-mapped.
     pub fn new() -> ActivePML4Table {
         ActivePML4Table {
-            top: unsafe { Unique::new(0xffffffff_fffff000 as *mut _) }
+            mapper: Mapper::new()
         }
-    } 
-
-    pub fn get(&self) -> &Table<PML4T> {
-        unsafe { self.top.get() }
     }
 
-    pub fn get_mut(&mut self) -> &mut Table<PML4T> {
-        unsafe { self.top.get_mut() }
-    }
+    /// execute closure f with `inactive` as temporarily mapped page tables
+    pub fn with<F>(&mut self, inactive: &mut InactivePML4Table, tempPage: &mut TemporaryPage, f: F) where F: FnOnce(&mut Mapper) {
+        let backup = Frame::from_paddress(::kern::arch::cr3());
+        let backup2 = self.entries[511];
+        assert!(backup2.pointed_frame().is_some());
+        assert!(backup == backup2.pointed_frame().unwrap());
 
-    pub fn translate(&self, vaddr: VirtualAddress) -> Option<PhysicalAddress> {
-        vaddr.validate();
+        {
+            let old_pml4 = tempPage.map_table_frame(backup, self);
 
-        let p3 = self.next_level_table(vaddr.pml4t_index());
-        let offset = vaddr.offset();
+            self.entries[511].set(inactive.pml4_frame, backup2.flags());
+            ::kern::arch::tlb_flush_all();
 
-        /// return frame for huge page
-        let huge_page = || -> Option<Frame> {
-            p3.and_then(|p3| {
-                let entry = &p3[vaddr.pdpt_index()];
-                if let Some(frame) = entry.pointed_frame() {
-                    //1G-page 
-                    if entry.flags().contains(HUGE_PAGE) {
-                        assert!(frame.number % (EntryCount * EntryCount) == 0);
-                        return Some(Frame {
-                            number: frame.number + vaddr.pdt_index() * EntryCount + vaddr.pt_index() 
-                        });
-                    }
-                }
+            f(self);
 
-                if let Some(p2) = p3.next_level_table(vaddr.pdpt_index()) {
-                    let entry = &p2[vaddr.pdt_index()];
-                    if let Some(frame) = entry.pointed_frame() {
-                        //2M-page
-                        if entry.flags().contains(HUGE_PAGE) {
-                            assert!(frame.number % EntryCount == 0);
-                            return Some(Frame {
-                                number: frame.number + vaddr.pt_index()
-                            });
-                        }
-                    }
-                }
-                None
-            })
-        };
+            /// we cannot use self.entries which is derefed from self.mapper.top.get_mut(), since 
+            /// active pml4's top now is not recursive-mapped anymore, that's why we temp-mapped it 
+            /// to old_pml4
+            old_pml4[511].set(backup, backup2.flags());
+            ::kern::arch::tlb_flush_all();
+        }
 
-        p3.and_then(|p3| p3.next_level_table(vaddr.pdpt_index()))
-            .and_then(|p2| p2.next_level_table(vaddr.pdt_index()))
-            .and_then(|p1| p1[vaddr.pt_index()].pointed_frame())
-            .or_else(huge_page)
-            .map(|frame| frame.start_address() + offset)
-    }
-
-    //FIXME: need to check if frame has been used
-    pub fn map_to<A>(&mut self, page: Page, frame: Frame, flags: EntryFlags, allocator: &mut A) 
-        where A: FrameAllocator {
-        let vaddr = page.start_address() as VirtualAddress;
-
-        let pdpt = self.next_level_table_or_create(vaddr.pml4t_index(), allocator);
-        let pdt = pdpt.next_level_table_or_create(vaddr.pdpt_index(), allocator);
-        let pt = pdt.next_level_table_or_create(vaddr.pdt_index(), allocator);
-
-        assert!(pt[vaddr.pt_index()].is_unused());
-        pt[vaddr.pt_index()].set(frame, flags | PRESENT);
-    }
-
-
-    pub fn map<A>(&mut self, page: Page, flags: EntryFlags, allocator: &mut A) 
-        where A: FrameAllocator {
-        let frame = allocator.alloc_frame().expect("not more free frame available");
-        self.map_to(page, frame, flags, allocator)
-    }
-
-    pub fn identity_map<A>(&mut self, frame: Frame, flags: EntryFlags, allocator: &mut A)
-        where A: FrameAllocator {
-        let page = Page::from_vaddress(frame.start_address());
-        self.map_to(page, frame, flags, allocator)
-    }
-
-    //TODO: support huge page
-    pub fn unmap<A>(&mut self, page: Page, allocator: &mut A) where A: FrameAllocator {
-        let vaddr = page.start_address() as VirtualAddress;
-        assert!(self.translate(vaddr).is_some());
-
-        let p3 = self.next_level_table_mut(vaddr.pml4t_index());
-        let offset = vaddr.offset();
-
-        let huge_page = || {None};
-
-        p3.and_then(|p3| p3.next_level_table_mut(vaddr.pdpt_index()))
-            .and_then(|p2| p2.next_level_table_mut(vaddr.pdt_index()))
-            .and_then(|p1| {
-                assert!(!p1[vaddr.pt_index()].is_unused());
-                let frame = p1[vaddr.pt_index()].pointed_frame().unwrap();
-                p1[vaddr.pt_index()].set_unused();
-
-                #[cfg(target_arch="x86_64")]
-                ::kern::arch::tlb_flush(vaddr);
-                //TODO: free pdpt, pdt, pt tables when empty
-                //allocator.dealloc_frame(frame);
-                Some(())
-            })
-            .or_else(huge_page);
+        tempPage.unmap(self);
     }
 }
 
-pub fn test_paging<A>(allocator: &mut A) where A: FrameAllocator {
+pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A: FrameAllocator {
+
+    let mut active = ActivePML4Table::new();
+    //FIXME: this magic address should be taken care of, prevent from conflicting
+    //with normal addresses, maybe mark it with unusable
+    let mut temp_page = TemporaryPage::new(Page::from_vaddress(0x0_cafebeef_000), allocator);
+
+    let mut new_map = {
+        let frame = allocator.alloc_frame().expect("no more memory");
+        InactivePML4Table::new(frame, &mut active, &mut temp_page)
+    };
+    printk!(Debug, "remap_the_kernel with\n\r");
+
+    active.with(&mut new_map, &mut temp_page, |mapper| {
+        let elf = mbinfo.elf_sections_tag().expect("elf sections is unavailable");
+        for sect in elf.sections() {
+            if !sect.is_allocated() || sect.size == 0 {
+                continue;
+            }
+
+            let mut flags = PRESENT;
+            //if !sect.flags().contains(ELF_SECTION_EXECUTABLE) {
+                //flags |= NO_EXECUTE;
+            //}
+            if sect.flags().contains(ELF_SECTION_WRITABLE) {
+                flags |= WRITABLE;
+            }
+
+            assert!(sect.start_address() % PAGE_SIZE == 0, "section {:?} not page aligned", sect);
+            assert!(sect.end_address() % PAGE_SIZE == 0, "section {:?} not page aligned", sect);
+
+            let r = FrameRange {
+                start: Frame::from_paddress(sect.start_address()),
+                end: Frame::from_paddress(sect.end_address() - 1) + 1,
+            };
+
+            printk!(Info, "identity map section [{:X}, {:X}), flags: {:?}\n\r",
+                r.start.start_address(), r.end.start_address(), flags);
+            for f in r {
+                mapper.identity_map(f, flags, allocator);
+            }
+        }
+
+
+        // map framebuffer
+        let fb = mbinfo.framebuffer_tag().expect("no framebuffer tag");
+        let r = {
+            let (start, sz) = (fb.addr as usize, fb.pitch * fb.height * (fb.bpp as u32)/8);
+            FrameRange {
+                start: Frame::from_paddress(start),
+                end: Frame::from_paddress(start + sz as usize - 1) + 1,
+            }
+        };
+        printk!(Info, "identity map framebuffer\n\r");
+        for f in r {
+            mapper.identity_map(f, WRITABLE, allocator);
+        }
+
+        {
+            // map mbinfo
+            let r = {
+                FrameRange {
+                    start: Frame::from_paddress(mbinfo.start_address()),
+                    end: Frame::from_paddress(mbinfo.end_address() - 1) + 1,
+                }
+            };
+            printk!(Info, "identity map mbinfo({:x})\n\r", mbinfo.start_address());
+            for f in r {
+                mapper.identity_map(f, EntryFlags::empty(), allocator);
+            }
+        }
+    });
+
+    let old_map = switch(new_map);
+    printk!(Info, "switching kernel map from {:?} to {:?}\n\r", old_map, new_map);
+}
+
+pub fn switch(new_map: InactivePML4Table) -> InactivePML4Table {
+    let mut active = ActivePML4Table::new();
+
+    let old = Frame::from_paddress(::kern::arch::cr3());
+
+    unsafe {
+        ::kern::arch::cr3_set(new_map.pml4_frame.start_address());
+    }
+
+    InactivePML4Table {
+        pml4_frame: old
+    }
+}
+
+pub fn test_paging_before_remap<A>(allocator: &mut A) where A: FrameAllocator {
     let mut pml4 = ActivePML4Table::new();
 
     {
@@ -356,15 +371,15 @@ pub fn test_paging<A>(allocator: &mut A) where A: FrameAllocator {
     }
 
     {
-
         let fb: VirtualAddress = 0xfd00_0000;
-        printk!(Debug, "0x{:x} 0x{:x} 0x{:x} 0x{:x} 0x{:x}\n\r", 
+        printk!(Debug, "fb 0x{:x} 0x{:x} 0x{:x} 0x{:x} 0x{:x}\n\r", 
                 fb.pml4t_index(), fb.pdpt_index(), fb.pdt_index(), fb.pt_index(), fb.offset());
+        pml4.translate(fb).expect("fb mapping failed");
         assert!(pml4.translate(fb).unwrap() == fb);
     }
 
     {
-        let vs = [0x30000000, 0x20000030, 0x10025030, 0x07025030];
+        let vs = [0x3000_0000, 0x2000_0030, 0x1002_5030, 0x0702_5030];
         for &v in &vs {
             printk!(Debug, "translate({:x}) = {:x}\n\r", v, pml4.translate(v).unwrap_or(0));
             assert!(pml4.translate(v).unwrap() == v);
@@ -391,7 +406,43 @@ pub fn test_paging<A>(allocator: &mut A) where A: FrameAllocator {
             *p = 0xBA;
         }
 
-        printk!(Debug, "read back value {:X}", v[100]);
+        printk!(Debug, "read back value {:X}\n\r", v[100]);
+        for &p in v.iter() {
+            assert!(p == 0xBA);
+        }
+
+        let page2 = Page { number: page.number + 100 };
+        pml4.map(page2, USER, allocator);
+        let mut v2 = unsafe { from_raw_parts_mut(page2.start_address() as *mut u8, 4096) };
+        for p in v2.iter_mut() {
+            *p = 3;
+        }
+
+        pml4.unmap(page, allocator);
+        for p in v2.iter_mut() {
+            *p = 3;
+        }
+    }
+}
+
+pub fn test_paging_after_remap<A>(allocator: &mut A) where A: FrameAllocator {
+    let mut pml4 = ActivePML4Table::new();
+
+    {
+        use core::slice::from_raw_parts_mut;
+
+        let frame = allocator.alloc_frame().expect("no more mem");
+        let page = Page::from_vaddress(0x7fff_DEAD_BEEF);
+        assert!(pml4.translate(page.start_address()).is_none());
+        pml4.map_to(page, frame, WRITABLE, allocator);
+        printk!(Debug, "map {:x} -> {:x}\n\r", page.start_address(), frame.start_address());
+
+        let mut v = unsafe { from_raw_parts_mut(page.start_address() as *mut u8, 4096) };
+        for p in v.iter_mut() {
+            *p = 0xBA;
+        }
+
+        printk!(Debug, "read back value {:X}\n\r", v[100]);
         for &p in v.iter() {
             assert!(p == 0xBA);
         }
