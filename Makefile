@@ -1,5 +1,10 @@
+ARCH := $(shell uname -m)
+ifeq ($(ARCH), darwin)
+	LD = ${HOME}/crossgcc/bin/x86_64-elf-ld
+else
+	LD = ld
+endif
 arch ?= x86_64
-LD = ${HOME}/crossgcc/bin/x86_64-elf-ld
 ldscript := src/kern/early.lds
 kernel := build/kernel
 kern_srcs := $(wildcard src/kern/arch/$(arch)/boot/*.asm)

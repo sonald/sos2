@@ -336,10 +336,11 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
 
     let old_map = switch(new_map);
     printk!(Info, "switching kernel map from {:?} to {:?}\n\r", old_map, new_map);
-
+    // we can use frame as vaddr since it's identity-mapped
+    let old_pml4_page = Page::from_vaddress(old_map.pml4_frame.start_address());
     // unmap old pml4 page as kernel stack guard page (boot.asm:early_pml4_base)
     // so kernel can now use 18KB stack
-    active.unmap(old_map, allocator);
+    active.unmap(old_pml4_page, allocator);
 }
 
 pub fn switch(new_map: InactivePML4Table) -> InactivePML4Table {
