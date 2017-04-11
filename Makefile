@@ -1,5 +1,5 @@
-ARCH := $(shell uname -m)
-ifeq ($(ARCH), darwin)
+OS := $(shell uname -s)
+ifeq ($(OS), Darwin)
 	LD = ${HOME}/crossgcc/bin/x86_64-elf-ld
 else
 	LD = ld

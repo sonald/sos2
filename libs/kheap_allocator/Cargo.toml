@@ -1,0 +1,7 @@
+[package]
+name = "kheap_allocator"
+version = "0.1.0"
+authors = ["Sian Cao <yinshuiboy@gmail.com>"]
+
+[dependencies]
+spin = "0.4.*"

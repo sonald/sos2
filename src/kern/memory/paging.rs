@@ -1,7 +1,7 @@
-use frame::{Frame, FrameAllocator, FrameRange};
-use mapper::Mapper;
+use super::frame::{Frame, FrameAllocator, FrameRange, AreaFrameAllocator};
+use super::mapper::Mapper;
 use super::PAGE_SIZE;
-use inactive::{InactivePML4Table, TemporaryPage};
+use super::inactive::{InactivePML4Table, TemporaryPage};
 #[macro_use] use kern::console as con;
 use con::LogLevel::*;
 use multiboot2::*;
@@ -272,7 +272,6 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
         let frame = allocator.alloc_frame().expect("no more memory");
         InactivePML4Table::new(frame, &mut active, &mut temp_page)
     };
-    printk!(Debug, "remap_the_kernel with\n\r");
 
     active.with(&mut new_map, &mut temp_page, |mapper| {
         let elf = mbinfo.elf_sections_tag().expect("elf sections is unavailable");
@@ -297,7 +296,7 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
                 end: Frame::from_paddress(sect.end_address() - 1) + 1,
             };
 
-            printk!(Info, "identity map section [{:X}, {:X}), flags: {:?}\n\r",
+            printk!(Info, "identity map section [{:#x}, {:#x}), flags: {:?}\n\r",
                 r.start.start_address(), r.end.start_address(), flags);
             for f in r {
                 mapper.identity_map(f, flags, allocator);
@@ -327,11 +326,12 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
                     end: Frame::from_paddress(mbinfo.end_address() - 1) + 1,
                 }
             };
-            printk!(Info, "identity map mbinfo({:x})\n\r", mbinfo.start_address());
+            printk!(Info, "identity map mbinfo({:#x})\n\r", mbinfo.start_address());
             for f in r {
                 mapper.identity_map(f, EntryFlags::empty(), allocator);
             }
         }
+
     });
 
     let old_map = switch(new_map);
@@ -341,6 +341,7 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
     // unmap old pml4 page as kernel stack guard page (boot.asm:early_pml4_base)
     // so kernel can now use 18KB stack
     active.unmap(old_pml4_page, allocator);
+
 }
 
 pub fn switch(new_map: InactivePML4Table) -> InactivePML4Table {
@@ -377,8 +378,6 @@ pub fn test_paging_before_remap<A>(allocator: &mut A) where A: FrameAllocator {
 
     {
         let fb: VirtualAddress = 0xfd00_0000;
-        printk!(Debug, "fb 0x{:x} 0x{:x} 0x{:x} 0x{:x} 0x{:x}\n\r", 
-                fb.pml4t_index(), fb.pdpt_index(), fb.pdt_index(), fb.pt_index(), fb.offset());
         pml4.translate(fb).expect("fb mapping failed");
         assert!(pml4.translate(fb).unwrap() == fb);
     }
@@ -386,7 +385,7 @@ pub fn test_paging_before_remap<A>(allocator: &mut A) where A: FrameAllocator {
     {
         let vs = [0x3000_0000, 0x2000_0030, 0x1002_5030, 0x0702_5030];
         for &v in &vs {
-            printk!(Debug, "translate({:x}) = {:x}\n\r", v, pml4.translate(v).unwrap_or(0));
+            printk!(Debug, "translate({:#x}) = {:#x}\n\r", v, pml4.translate(v).unwrap_or(0));
             assert!(pml4.translate(v).unwrap() == v);
         }
 
@@ -404,17 +403,15 @@ pub fn test_paging_before_remap<A>(allocator: &mut A) where A: FrameAllocator {
         let page = Page::from_vaddress(0x6218_2035_3201);
         assert!(pml4.translate(page.start_address()).is_none());
         pml4.map_to(page, frame, EntryFlags::empty(), allocator);
-        printk!(Debug, "map {:x} -> {:x}\n\r", page.start_address(), frame.start_address());
+        printk!(Debug, "map {:#x} -> {:#x}\n\r", page.start_address(), frame.start_address());
 
         let mut v = unsafe { from_raw_parts_mut(page.start_address() as *mut u8, 4096) };
         for p in v.iter_mut() {
             *p = 0xBA;
         }
 
-        printk!(Debug, "read back value {:X}\n\r", v[100]);
-        for &p in v.iter() {
-            assert!(p == 0xBA);
-        }
+        //printk!(Debug, "read back value {:X}\n\r", v[100]);
+        for &p in v.iter() { assert!(p == 0xBA); }
 
         let page2 = Page { number: page.number + 100 };
         pml4.map(page2, USER, allocator);
@@ -425,11 +422,10 @@ pub fn test_paging_before_remap<A>(allocator: &mut A) where A: FrameAllocator {
 
         pml4.unmap(page, allocator);
         // this works cause cr0.WP is not set yet
-        for p in v2.iter_mut() {
-            *p = 3;
-        }
+        for p in v2.iter_mut() { *p = 3; }
     }
 }
+
 
 pub fn test_paging_after_remap<A>(allocator: &mut A) where A: FrameAllocator {
     let mut pml4 = ActivePML4Table::new();
@@ -441,14 +437,14 @@ pub fn test_paging_after_remap<A>(allocator: &mut A) where A: FrameAllocator {
         let page = Page::from_vaddress(0x7fff_DEAD_BEEF);
         assert!(pml4.translate(page.start_address()).is_none());
         pml4.map_to(page, frame, WRITABLE, allocator);
-        printk!(Debug, "map {:x} -> {:x}\n\r", page.start_address(), frame.start_address());
+        printk!(Debug, "map {:#x} -> {:#x}\n\r", page.start_address(), frame.start_address());
 
         let mut v = unsafe { from_raw_parts_mut(page.start_address() as *mut u8, 4096) };
         for p in v.iter_mut() {
             *p = 0xBA;
         }
 
-        printk!(Debug, "read back value {:X}\n\r", v[100]);
+        //printk!(Debug, "read back value {:X}\n\r", v[100]);
         for &p in v.iter() {
             assert!(p == 0xBA);
         }
@@ -461,8 +457,6 @@ pub fn test_paging_after_remap<A>(allocator: &mut A) where A: FrameAllocator {
         }
 
         pml4.unmap(page, allocator);
-        //for p in v2.iter_mut() {
-            //*p = 3;
-        //}
+        //for p in v2.iter_mut() { *p = 3; }
     }
 }

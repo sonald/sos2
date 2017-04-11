@@ -1,6 +1,6 @@
 use core::ptr::Unique;
-use frame::{Frame, FrameAllocator};
-use paging::*;
+use super::frame::{Frame, FrameAllocator};
+use super::paging::*;
 
 pub struct Mapper {
     top: Unique<Table<PML4T>>

@@ -12,6 +12,10 @@ multiboot2 = { git = "https://github.com/sonald/multiboot2-elf64" }
 spin = "0.4.*"
 bitflags = "0.8.*"
 
+[dependencies.kheap_allocator]
+path = "./libs/kheap_allocator"
+
+
 # The development profile, used for `cargo build`.
 [profile.dev]
 panic = "abort"

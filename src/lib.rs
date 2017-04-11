@@ -3,20 +3,25 @@
 #![feature(unique)]
 #![feature(asm)]
 #![feature(range_contains)]
+#![feature(alloc, collections)]
 #![no_std]
 
 extern crate rlibc;
 extern crate multiboot2;
 extern crate spin;
+
+extern crate kheap_allocator;
+extern crate alloc;
+#[macro_use] extern crate collections;
+
 #[macro_use] extern crate bitflags;
 
-#[macro_use]
-mod kern;
+#[macro_use] mod kern;
 
 use kern::console as con;
 use con::LogLevel::*;
 use kern::driver::serial;
-use kern::memory::*;
+use kern::memory;
 
 #[allow(dead_code)]
 fn busy_wait () {
@@ -67,16 +72,14 @@ fn display(fb: &multiboot2::FramebufferTag) {
     }
 }
 
-fn test_frame_allocator(afa: &mut AreaFrameAllocator) {
-    printk!(Debug, "Allocator: \n\r{:?}\n\r", afa);
-
-    let mut i = 0;
-    while let Some(f) = afa.alloc_frame() {
-        //printk!(Warn, "0x{:x}  ", f.number);
-        i += 1;
-        if i == 100 { break }
+fn test_kheap_allocator() {
+    let v = vec![1,2,3,4];
+    let b = alloc::boxed::Box::new(0xcafe);
+    printk!(Debug, "v = {:?}, b = {:?}\n\r", v, b);
+    let vs = vec!["Loading", "SOS2"];
+    for s in vs {
+        printk!(Debug, "{} ", s);
     }
-    printk!(Warn, "allocated #{} frames\n\r", i);
 }
 
 #[no_mangle]
@@ -87,48 +90,14 @@ pub extern fn kernel_main(mb2_header: usize) {
     printk!(Info, "Loading SOS2....\n\r");
 
     let mbinfo = unsafe { multiboot2::load(mb2_header) };
-    printk!(Info, "{:?}\n\r", mbinfo);
-
-    let mmap = mbinfo.memory_map_tag().expect("memory map is unavailable");
-    let start = mmap.memory_areas().map(|a| a.base_addr).min().unwrap();
-    let end = mmap.memory_areas().map(|a| a.base_addr + a.length).max().unwrap();
-    printk!(Info, "mmap start: 0x{:x}, end: 0x{:x}\n\r", start ,end);
-
-    let elf = mbinfo.elf_sections_tag().expect("elf sections is unavailable");
-    let kernel_start = elf.sections().map(|a| a.addr).min().unwrap();
-    let kernel_end = elf.sections().map(|a| a.addr + a.size).max().unwrap();
-    printk!(Info, "kernel start: 0x{:x}, end: 0x{:x}\n\r", kernel_start, kernel_end);
-
-    let (mb_start, mb_end) = (mb2_header, mb2_header + mbinfo.total_size as usize);
-    printk!(Info, "mboot2 start: 0x{:x}, end: 0x{:x}\n\r", mb_start, mb_end);
-
+    printk!(Info, "{:#?}\n\r", mbinfo);
 
     let fb = mbinfo.framebuffer_tag().expect("framebuffer tag is unavailale");
-    printk!(Debug, "fb: {:?}\n\r", fb);
+    printk!(Debug, "fb: {:#?}\n\r", fb);
     display(&fb);
 
-    use core::ops::Range;
-    let kr = Range {
-        start: Frame::from_paddress(kernel_start as usize),
-        end: Frame::from_paddress(kernel_end as usize - 1) + 1,
-    };
-    let mr = Range {
-        start: Frame::from_paddress(mb_start),
-        end: Frame::from_paddress(mb_end - 1) + 1,
-    };
-    let mut afa = AreaFrameAllocator::new(mmap.memory_areas(), kr, mr);
-    {
-        test_frame_allocator(&mut afa);
-        paging::test_paging_before_remap(&mut afa);
-    }
-    kern::arch::enable_nxe_bit();
-    kern::arch::enable_write_protect_bit();
-    paging::remap_the_kernel(&mut afa, &mbinfo);
-    {
-        test_frame_allocator(&mut afa);
-        paging::test_paging_after_remap(&mut afa);
-    }
-    printk!(Critical, "Pass All Tests!!!!!\n\r");
+    memory::init(&mbinfo);
+    test_kheap_allocator();
 }
 
 #[lang = "eh_personality"]
