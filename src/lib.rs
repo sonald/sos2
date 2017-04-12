@@ -49,9 +49,12 @@ fn display(fb: &multiboot2::FramebufferTag) {
     use core::mem::size_of_val;
     let vga;
 
+    printk!(Debug, "fb: {:#?}\n\r", fb);
+
     if fb.frame_type != multiboot2::FramebufferType::Rgb {
         return;
     }
+
     unsafe {
         vga = fb.addr as *mut u32;
         let mut clr: u32 = 0;
@@ -76,7 +79,7 @@ fn test_kheap_allocator() {
     let v = vec![1,2,3,4];
     let b = alloc::boxed::Box::new(0xcafe);
     printk!(Debug, "v = {:?}, b = {:?}\n\r", v, b);
-    let vs = vec!["Loading", "SOS2"];
+    let vs = vec!["Loading", "SOS2", "\n\r"];
     for s in vs {
         printk!(Debug, "{} ", s);
     }
@@ -93,7 +96,6 @@ pub extern fn kernel_main(mb2_header: usize) {
     printk!(Info, "{:#?}\n\r", mbinfo);
 
     let fb = mbinfo.framebuffer_tag().expect("framebuffer tag is unavailale");
-    printk!(Debug, "fb: {:#?}\n\r", fb);
     display(&fb);
 
     memory::init(&mbinfo);

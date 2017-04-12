@@ -28,8 +28,8 @@ pub fn init(mbinfo: &BootInformation) {
         printk!(Info, "mmap start: {:#x}, end: {:#x}\n\r", start ,end);
 
         let elf = mbinfo.elf_sections_tag().expect("elf sections is unavailable");
-        let kernel_start = elf.sections().map(|a| a.addr).min().unwrap();
-        let kernel_end = elf.sections().map(|a| a.addr + a.size).max().unwrap();
+        let kernel_start = elf.sections().filter(|a| a.is_allocated()).map(|a| a.addr).min().unwrap();
+        let kernel_end = elf.sections().filter(|a| a.is_allocated()).map(|a| a.addr + a.size).max().unwrap();
         printk!(Info, "kernel start: {:#x}, end: {:#x}\n\r", kernel_start, kernel_end);
 
         let (mb_start, mb_end) = (mbinfo.start_address(), mbinfo.end_address());
