@@ -7,3 +7,4 @@ pub mod console;
 pub mod util;
 pub mod driver;
 pub mod memory;
+pub mod interrupts;

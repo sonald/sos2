@@ -41,7 +41,7 @@ impl KHeapAllocator {
 
 ///NOTE: start address should be adjusted according to kernel size and mbinfo 
 pub const START_ADDRESS: usize = 0x200_000;
-pub const ALLOC_SIZE: usize = 0x1000 * 64;
+pub const ALLOC_SIZE: usize = 0x1000 * 1024;
 static KHEAP_ALLOCATOR: Mutex<KHeapAllocator> = Mutex::new(KHeapAllocator::new(START_ADDRESS, ALLOC_SIZE));
 
 #[no_mangle]

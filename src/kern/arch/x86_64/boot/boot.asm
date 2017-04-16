@@ -221,5 +221,5 @@ early_pd_base:
 
 section .early_stack nobits
 _kern_stack:
-    times 4 resb 4096
+    times 8 resb 4096
 kern_stack_top:

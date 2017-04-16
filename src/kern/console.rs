@@ -232,20 +232,6 @@ impl Write for Console {
     }
 }
 
-/// obsolete
-#[allow(dead_code)]
-extern fn display(msg: &str, col: isize, row: isize) {
-    let vga;
-    unsafe {
-        vga = 0xb8000 as *mut u8;
-        for (i, b) in msg.bytes().enumerate() {
-            let off = (row * 80 + col + i as isize) * 2;
-            *vga.offset(off) = b;
-            *vga.offset(off+1) = 0x4f;
-        }
-    }
-}
-
 #[allow(non_upper_case_globals)]
 pub static tty1: Mutex<Console> = Mutex::new(Console::new());
 
@@ -277,15 +263,16 @@ pub enum LogLevel {
 macro_rules! printk {
     ($lv:expr, $($arg:tt)*) => ({
         use $crate::kern::console::*;
+        let attr = match $lv {
+            LogLevel::Debug => Attribute::new(Color::Green, Color::Black),
+            LogLevel::Normal => Attribute::new(Color::White, Color::Black),
+            LogLevel::Info => Attribute::new(Color::Cyan, Color::Black),
+            LogLevel::Warn => Attribute::new(Color::Red, Color::Black),
+            LogLevel::Critical => Attribute::new(Color::LightRed, Color::White),
+        };
+
         let old_attr = {
             let mut con = tty1.lock();
-            let attr = match $lv {
-                LogLevel::Debug => Attribute::new(Color::Green, Color::Black),
-                LogLevel::Normal => Attribute::new(Color::White, Color::Black),
-                LogLevel::Info => Attribute::new(Color::Cyan, Color::Black),
-                LogLevel::Warn => Attribute::new(Color::Red, Color::Black),
-                LogLevel::Critical => Attribute::new(Color::LightRed, Color::White),
-            };
             con.set_attr(attr)
         };
         print!( $($arg)* );

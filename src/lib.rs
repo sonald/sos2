@@ -4,6 +4,8 @@
 #![feature(asm)]
 #![feature(range_contains)]
 #![feature(alloc, collections)]
+#![feature(naked_functions)]
+#![feature(core_intrinsics)]
 #![no_std]
 
 extern crate rlibc;
@@ -15,6 +17,8 @@ extern crate alloc;
 #[macro_use] extern crate collections;
 
 #[macro_use] extern crate bitflags;
+extern crate bit_field;
+#[macro_use] extern crate lazy_static;
 
 #[macro_use] mod kern;
 
@@ -22,6 +26,7 @@ use kern::console as con;
 use con::LogLevel::*;
 use kern::driver::serial;
 use kern::memory;
+use kern::interrupts;
 
 #[allow(dead_code)]
 fn busy_wait () {
@@ -46,7 +51,6 @@ fn print_test() {
 /// test rgb framebuffer drawing
 fn display(fb: &multiboot2::FramebufferTag) {
     use core::ptr::*;
-    use core::mem::size_of_val;
     let vga;
 
     printk!(Debug, "fb: {:#?}\n\r", fb);
@@ -100,6 +104,9 @@ pub extern fn kernel_main(mb2_header: usize) {
 
     memory::init(&mbinfo);
     test_kheap_allocator();
+
+    interrupts::init();
+    interrupts::test_idt();
 }
 
 #[lang = "eh_personality"]

@@ -11,10 +11,14 @@ rlibc = "1.0.*"
 multiboot2 = { git = "https://github.com/sonald/multiboot2-elf64" }
 spin = "0.4.*"
 bitflags = "0.8.*"
+bit_field = "0.7.*"
 
 [dependencies.kheap_allocator]
 path = "./libs/kheap_allocator"
 
+[dependencies.lazy_static]
+version = "0.2.*"
+features = ["spin_no_std"]
 
 # The development profile, used for `cargo build`.
 [profile.dev]
