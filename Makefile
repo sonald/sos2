@@ -5,11 +5,12 @@ else
 	LD = ld
 endif
 arch ?= x86_64
+target ?= $(arch)-sos2
 ldscript := src/kern/early.lds
 kernel := build/kernel
 kern_srcs := $(wildcard src/kern/arch/$(arch)/boot/*.asm)
 kern_objs := $(patsubst %.asm, build/%.o, $(kern_srcs))
-rust_core := target/$(arch)-unknown-linux-gnu/debug/libsos2.a
+rust_core := target/$(target)/debug/libsos2.a
 
 all: $(kernel) sos2.iso
 
@@ -18,7 +19,7 @@ print-%: ; @echo $* = $($*)
 
 $(kernel): $(ldscript) $(kern_objs) $(rust_core)
 	@mkdir -p $(@D)
-	@cargo build --target=$(arch)-unknown-linux-gnu
+	xargo build --target=$(target)
 	$(LD) -n -nostdlib -gc-sections -T $(ldscript)  -o $@ $(kern_objs) $(rust_core)
 
 build/%.o: %.asm
@@ -26,7 +27,7 @@ build/%.o: %.asm
 	nasm -f elf64 $< -o $@
 
 $(rust_core): src/lib.rs
-	cargo build --target=$(arch)-unknown-linux-gnu
+	xargo build --target=$(target)
 
 
 sos2.iso: $(kernel) 
