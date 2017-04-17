@@ -17,16 +17,15 @@ all: $(kernel) sos2.iso
 # print makefile variable (for debug purpose)
 print-%: ; @echo $* = $($*)
 
-$(kernel): $(ldscript) $(kern_objs) $(rust_core)
+$(kernel): kern $(ldscript) $(kern_objs) $(rust_core)
 	@mkdir -p $(@D)
-	xargo build --target=$(target)
 	$(LD) -n -nostdlib -gc-sections -T $(ldscript)  -o $@ $(kern_objs) $(rust_core)
 
 build/%.o: %.asm
 	@mkdir -p $(@D)
 	nasm -f elf64 $< -o $@
 
-$(rust_core): src/lib.rs
+kern: 
 	xargo build --target=$(target)
 
 
