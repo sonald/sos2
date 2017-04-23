@@ -10,13 +10,13 @@ use core::ops::{Deref, DerefMut};
 impl Deref for Mapper {
     type Target = Table<PML4T>;
     fn deref(&self) -> &Self::Target {
-        unsafe { self.get() }
+        self.get()
     }
 }
 
 impl DerefMut for Mapper {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { self.get_mut() }
+        self.get_mut()
     }
 }
 
@@ -49,9 +49,9 @@ impl Mapper {
                 if let Some(frame) = entry.pointed_frame() {
                     //1G-page 
                     if entry.flags().contains(HUGE_PAGE) {
-                        assert!(frame.number % (EntryCount * EntryCount) == 0);
+                        assert!(frame.number % (ENTRY_COUNT * ENTRY_COUNT) == 0);
                         return Some(Frame {
-                            number: frame.number + vaddr.pdt_index() * EntryCount + vaddr.pt_index() 
+                            number: frame.number + vaddr.pdt_index() * ENTRY_COUNT + vaddr.pt_index() 
                         });
                     }
                 }
@@ -61,7 +61,7 @@ impl Mapper {
                     if let Some(frame) = entry.pointed_frame() {
                         //2M-page
                         if entry.flags().contains(HUGE_PAGE) {
-                            assert!(frame.number % EntryCount == 0);
+                            assert!(frame.number % ENTRY_COUNT == 0);
                             return Some(Frame {
                                 number: frame.number + vaddr.pt_index()
                             });
@@ -111,7 +111,6 @@ impl Mapper {
         assert!(self.translate(vaddr).is_some());
 
         let p3 = self.next_level_table_mut(vaddr.pml4t_index());
-        let offset = vaddr.offset();
 
         let huge_page = || {None};
 
@@ -122,8 +121,7 @@ impl Mapper {
                 let frame = p1[vaddr.pt_index()].pointed_frame().unwrap();
                 p1[vaddr.pt_index()].set_unused();
 
-                #[cfg(target_arch="x86_64")]
-                ::kern::arch::tlb_flush(vaddr);
+                ::kern::arch::cpu::tlb_flush(vaddr);
                 //TODO: free pdpt, pdt, pt tables when empty
                 //allocator.dealloc_frame(frame);
                 Some(())

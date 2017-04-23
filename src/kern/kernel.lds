@@ -1,32 +1,48 @@
 ENTRY(early_start)
 
-SECTIONS
+SECTIONS 
 {
-    . = 0xC0100000;
+    . = 0xffff880000000000 + 1M;
+    _start = .;
 
-    .text 0xC0100000: AT(ADDR(.text) - 0xC0000000)
-    {
-        *(.mboot)
-        *(.text)
-        *(.rodata)
+    .rodata : AT(1M) {
+        KEEP(*(.mboot2))
+        *(.rodata .rodata.*)
+        . = ALIGN(4K);
     }
 
-    . = ALIGN(0x1000);
 
-    _data = .;
-
-    .data : 
-    { 
-        *(.data)
+    .text : {
+        *(.text .text.*)
+        . = ALIGN(4K);
     }
 
-    .bss :
-    {
-        *(COMMON)
-        *(.bss)
-        *(.bootstrap_stack)
+    .data : {
+        *(.early_gdt)
+        *(.data .data.*)
+        *(.got .got.plt)
+        *(.early_stack)
+        . = ALIGN(4K);
     }
 
+    .data.rel.ro : {
+        *(.data.rel.ro.local*)
+        *(.data.rel.ro .data.rel.ro.*)
+        . = ALIGN(4K);
+    }
+
+    .gcc_except_table : {
+        *(.gcc_except_table)
+        . = ALIGN(4K);
+    }
+
+    .debug : {
+        *(.debug_str .debug_abbrev)
+        *(.debug_info .debug_ranges)
+        *(.debug_macinfo .debug_pubnames)
+        *(.debug_pubtypes .debug_line) 
+        *(.symtab .strtab)
+        . = ALIGN(4K);
+    }
     _end = .;
 }
-

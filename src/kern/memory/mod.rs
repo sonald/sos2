@@ -49,8 +49,8 @@ pub fn init(mbinfo: &BootInformation) {
             test_frame_allocator(&mut afa);
             test_paging_before_remap(&mut afa);
         }
-        ::kern::arch::enable_nxe_bit();
-        ::kern::arch::enable_write_protect_bit();
+        ::kern::arch::cpu::enable_nxe_bit();
+        ::kern::arch::cpu::enable_write_protect_bit();
         remap_the_kernel(&mut afa, &mbinfo);
         {
             test_frame_allocator(&mut afa);

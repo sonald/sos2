@@ -60,6 +60,9 @@ pub trait FrameAllocator {
     fn dealloc_frame(&mut self, frame: Frame);
 }
 
+/// early stage fast frame allocator, dealloc_frame is not implemented,
+/// since there is no need to free. after paging system being setuped, 
+/// a new frame allocator needed.
 #[derive(Debug)]
 pub struct AreaFrameAllocator {
     next_free_frame: Frame,

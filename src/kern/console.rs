@@ -226,7 +226,13 @@ impl Write for Console {
     fn write_str(&mut self, s: &str) -> Result {
         for b in s.bytes() {
             self.write_byte(b);
-            unsafe { serial::write_serial(b) };
+        }
+
+        unsafe {
+            let mut com1 = serial::COM1.lock();
+            for b in s.bytes() {
+                com1.write(b);
+            }
         }
         Ok(())
     }

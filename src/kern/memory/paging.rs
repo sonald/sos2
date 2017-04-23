@@ -42,7 +42,7 @@ bitflags! {
 }
 
 const AddressBitsMask: usize = 0x000fffff_fffff000;
-pub const EntryCount: usize = 512;
+pub const ENTRY_COUNT: usize = 512;
 
 pub type PhysicalAddress = usize;
 pub type VirtualAddress = usize;
@@ -143,7 +143,7 @@ impl HierarchyTableLevel for PDT {
 
 use core::marker::PhantomData;
 pub struct Table<L: TableLevel> {
-    entries: [PageEntry; EntryCount],
+    entries: [PageEntry; ENTRY_COUNT],
     phantom: PhantomData<L>
     
 }
@@ -209,7 +209,6 @@ impl<L> Table<L> where L: HierarchyTableLevel {
     }
 }
 
-use core::ptr::Unique;
 pub struct ActivePML4Table {
     mapper: Mapper
 }
@@ -237,7 +236,7 @@ impl ActivePML4Table {
 
     /// execute closure f with `inactive` as temporarily mapped page tables
     pub fn with<F>(&mut self, inactive: &mut InactivePML4Table, tempPage: &mut TemporaryPage, f: F) where F: FnOnce(&mut Mapper) {
-        let backup = Frame::from_paddress(::kern::arch::cr3());
+        let backup = Frame::from_paddress(::kern::arch::cpu::cr3());
         let backup2 = self.entries[511];
         assert!(backup2.pointed_frame().is_some());
         assert!(backup == backup2.pointed_frame().unwrap());
@@ -246,7 +245,7 @@ impl ActivePML4Table {
             let old_pml4 = tempPage.map_table_frame(backup, self);
 
             self.entries[511].set(inactive.pml4_frame, backup2.flags());
-            ::kern::arch::tlb_flush_all();
+            ::kern::arch::cpu::tlb_flush_all();
 
             f(self);
 
@@ -254,7 +253,7 @@ impl ActivePML4Table {
             /// active pml4's top now is not recursive-mapped anymore, that's why we temp-mapped it 
             /// to old_pml4
             old_pml4[511].set(backup, backup2.flags());
-            ::kern::arch::tlb_flush_all();
+            ::kern::arch::cpu::tlb_flush_all();
         }
 
         tempPage.unmap(self);
@@ -345,12 +344,10 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
 }
 
 pub fn switch(new_map: InactivePML4Table) -> InactivePML4Table {
-    let mut active = ActivePML4Table::new();
-
-    let old = Frame::from_paddress(::kern::arch::cr3());
+    let old = Frame::from_paddress(::kern::arch::cpu::cr3());
 
     unsafe {
-        ::kern::arch::cr3_set(new_map.pml4_frame.start_address());
+        ::kern::arch::cpu::cr3_set(new_map.pml4_frame.start_address());
     }
 
     InactivePML4Table {
@@ -389,10 +386,10 @@ pub fn test_paging_before_remap<A>(allocator: &mut A) where A: FrameAllocator {
             assert!(pml4.translate(v).unwrap() == v);
         }
 
-        let last = EntryCount * EntryCount * PAGE_SIZE - 1;
+        let last = ENTRY_COUNT * ENTRY_COUNT * PAGE_SIZE - 1;
         assert!(pml4.translate(last).unwrap() == last);
 
-        let unmapped = EntryCount * EntryCount * PAGE_SIZE;
+        let unmapped = ENTRY_COUNT * ENTRY_COUNT * PAGE_SIZE;
         assert!(pml4.translate(unmapped).is_none());
     }
 

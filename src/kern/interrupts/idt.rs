@@ -122,7 +122,7 @@ macro_rules! define_handler {
                      iretq"
                      ::"i"($handler as HandlerFunc)
                      :"rdi"
-                     :"intel");
+                     :"intel", "volatile");
                 ::core::intrinsics::unreachable()
             };
         }
@@ -169,7 +169,7 @@ macro_rules! define_handler_with_errno {
                      iretq"
                      ::"i"($handler as HandlerFuncWithErrCode)
                      :"rdi", "rsi"
-                     :"intel");
+                     :"intel", "volatile");
                 ::core::intrinsics::unreachable()
             };
         }
@@ -179,6 +179,7 @@ macro_rules! define_handler_with_errno {
 }
 
 /// this table comes from am64 vol2, it's a litte different with x86_64 crate
+#[allow(dead_code)]
 pub struct InterruptDescriptorTable {
     pub divide_by_zero: Entry,
     pub debug: Entry,

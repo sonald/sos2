@@ -11,6 +11,7 @@
 extern crate rlibc;
 extern crate multiboot2;
 extern crate spin;
+extern crate x86_64;
 
 extern crate kheap_allocator;
 extern crate alloc;
@@ -89,15 +90,28 @@ fn test_kheap_allocator() {
     }
 }
 
+extern {
+    static _start: u64;
+    static _end: u64;
+}
+
 #[no_mangle]
 pub extern fn kernel_main(mb2_header: usize) {
-    unsafe { serial::init_serial(); }
+    unsafe { 
+        let mut com1 = serial::COM1.lock();
+        com1.init();
+    }
 
     con::clear();
     printk!(Info, "Loading SOS2....\n\r");
 
     let mbinfo = unsafe { multiboot2::load(mb2_header) };
     printk!(Info, "{:#?}\n\r", mbinfo);
+
+    let (pa, pe) = unsafe {
+        (&_start as *const _ as u64, &_end as *const _ as u64)
+    };
+    printk!(Info, "_start {:#X}, _end {:#X}\n\r", pa, pe);
 
     let fb = mbinfo.framebuffer_tag().expect("framebuffer tag is unavailale");
     display(&fb);

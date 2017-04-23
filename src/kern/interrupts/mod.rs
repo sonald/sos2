@@ -1,9 +1,8 @@
 #[macro_use] pub mod idt;
-
-use ::kern::console as con;
-use con::LogLevel::*;
-use ::kern::arch::{cs, cr2};
 pub use self::idt::*;
+
+use ::kern::console::LogLevel::*;
+use ::kern::arch::cpu::{cs, cr2};
 
 lazy_static! {
     pub static ref IDT: InterruptDescriptorTable = {
@@ -27,21 +26,18 @@ bitflags! {
     }
 }
 
-#[no_mangle]
-extern "C" fn page_fault_handler(frame: &mut ExceptionStackFrame, errCode: u64) {
-    let err = PageFaultErrorCode::from_bits(errCode).unwrap();
-    printk!(Debug, "page fault! {:#?}\n\rerrCode: {:#?}, cr2: {:#x}\n\r", frame, err, cr2());
+extern "C" fn page_fault_handler(frame: &mut ExceptionStackFrame, err_code: u64) {
+    let err = PageFaultErrorCode::from_bits(err_code).unwrap();
+    printk!(Debug, "page fault! {:#?}\n\rerr code: {:#?}, cr2: {:#x}\n\r", frame, err, cr2());
     loop {
         unsafe { asm!("hlt"); }
     }
 }
 
-#[no_mangle]
 extern "C" fn int3_handler(frame: &mut ExceptionStackFrame) {
     printk!(Debug, "int3!! {:#?}\n\r", frame);
 }
 
-#[no_mangle]
 extern "C" fn divide_by_zero_handler(frame: &mut ExceptionStackFrame) {
     printk!(Debug, "divide_by_zero!! {:#?}\n\r", frame);
     loop {}
