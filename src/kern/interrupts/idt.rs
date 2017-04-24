@@ -11,7 +11,8 @@ pub struct EntryOptions(u16);
 impl EntryOptions {
     pub fn new() -> EntryOptions {
         let mut ret = EntryOptions::empty();
-        ret.set_present(true).set_trap_gate();
+        //disable interrupts by default, syscall later will use trap gate
+        ret.set_present(true).set_interrupt_gate();
         ret
     }
 
@@ -214,7 +215,9 @@ pub struct InterruptDescriptorTable {
     /// vector nr. 31
     reserved_3: Entry,
 
-    pub interrupts: [Entry; 256 - 32],
+    pub irqs: [Entry; 16],
+
+    pub interrupts: [Entry; 256 - 48],
 }
 
 impl InterruptDescriptorTable {
@@ -252,7 +255,8 @@ impl InterruptDescriptorTable {
             security_exception: Entry::empty(),
             reserved_3: Entry::empty(),
 
-            interrupts: [Entry::empty(); 256 - 32],
+            irqs: [Entry::empty(); 16],
+            interrupts: [Entry::empty(); 256 - 48],
         }
     }
 

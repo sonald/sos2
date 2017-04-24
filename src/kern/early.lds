@@ -26,6 +26,12 @@ SECTIONS
         . = ALIGN(4K);
     }
 
+
+    .bss : {
+        *(.bss .bss.*)
+        . = ALIGN(4K);
+    }
+
     .data.rel.ro : {
         *(.data.rel.ro.local*)
         *(.data.rel.ro .data.rel.ro.*)

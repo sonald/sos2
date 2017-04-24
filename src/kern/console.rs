@@ -4,6 +4,13 @@ use core::ptr::{Unique, write_volatile};
 use core::fmt::{Write, Result};
 use spin::Mutex;
 
+use ::kern::arch::port::{Port};
+
+const CRTC_ADDR_REG: u16 = 0x3D4;
+const CRTC_ADDR_DATA: u16 = 0x3D5;
+const CURSOR_LOCATION_HIGH_IND: u8 = 0x0E;
+const CURSOR_LOCATION_LOW_IND: u8 = 0x0F;
+
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
 #[repr(u8)]
@@ -52,8 +59,9 @@ struct Buffer {
 pub struct Console {
     buf: Unique<Buffer>,
     cursor: usize,  // cursor as offset
-    attr: Attribute // current char attribute
-
+    attr: Attribute, // current char attribute
+    crtc_reg: Port<u8>,
+    crtc_data: Port<u8>
 }
 
 /// extract offset-based cursor into (row, col) pair
@@ -72,7 +80,23 @@ impl Console {
             buf: unsafe { Unique::new(0xb8000 as *mut _) },
             cursor: 0,
             attr: Attribute::new(Color::White, Color::Black),
+            crtc_reg: Port::new(CRTC_ADDR_REG),
+            crtc_data: Port::new(CRTC_ADDR_DATA)
         }
+    }
+
+    fn set_phy_cursor(&mut self, cursor: usize) {
+        let linear = cursor as u16;
+        self.crtc_reg.write(CURSOR_LOCATION_HIGH_IND);
+        self.crtc_data.write((linear >> 8) as u8);
+        self.crtc_reg.write(CURSOR_LOCATION_LOW_IND);
+        self.crtc_data.write(linear as u8);
+    }
+
+    fn update_cursor(&mut self, row: usize, col: usize) {
+        let v = contract_cursor(row, col);
+        self.cursor = v;
+        self.set_phy_cursor(v);
     }
 
     pub fn set_attr(&mut self, val: Attribute) -> Attribute {
@@ -83,6 +107,14 @@ impl Console {
 
     pub fn get_attr(&self) -> Attribute {
         self.attr
+    }
+
+    pub fn with<F>(con: &Mutex<Console>, row: usize, col: usize, f: F) where F: FnOnce() {
+        let old = con.lock().cursor;
+        con.lock().update_cursor(row, col);
+        f();
+        let (cy, cx) = extract_cursor(old);
+        con.lock().update_cursor(cy, cx);
     }
 
     pub fn clear(&mut self) {
@@ -98,6 +130,8 @@ impl Console {
                     data.offset((off * CONSOLE_WIDTH) as isize), size_of_val(&blank_line));
             }
         }
+
+        self.update_cursor(0, 0);
     }
 
 
@@ -118,7 +152,7 @@ impl Console {
             self.scroll_up();
         }
 
-        self.cursor = contract_cursor(cy, cx);
+        self.update_cursor(cy, cx);
         old
     }
 
@@ -137,7 +171,7 @@ impl Console {
             cx -= 1;
         }
 
-        self.cursor = contract_cursor(cy, cx);
+        self.update_cursor(cy, cx);
         old
     }
 
@@ -185,7 +219,7 @@ impl Console {
                 }
 
                 let old = self.cursor;
-                self.cursor = contract_cursor(cy, cx);
+                self.update_cursor(cy, cx);
                 unsafe {
                     let data = (&mut self.buf.get_mut().data).as_mut_ptr();
                     for i in old..self.cursor {
@@ -200,11 +234,11 @@ impl Console {
                     cy = CONSOLE_HEIGHT - 1;
                     self.scroll_up();
                 }
-                self.cursor = contract_cursor(cy, cx);
+                self.update_cursor(cy, cx);
             },
             b'\r' => {
                 cx = 0;
-                self.cursor = contract_cursor(cy, cx);
+                self.update_cursor(cy, cx);
             }, 
             _ => {
                 if self.cursor >= CONSOLE_WIDTH * CONSOLE_HEIGHT {
@@ -269,6 +303,7 @@ pub enum LogLevel {
 macro_rules! printk {
     ($lv:expr, $($arg:tt)*) => ({
         use $crate::kern::console::*;
+
         let attr = match $lv {
             LogLevel::Debug => Attribute::new(Color::Green, Color::Black),
             LogLevel::Normal => Attribute::new(Color::White, Color::Black),

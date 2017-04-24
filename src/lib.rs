@@ -121,6 +121,8 @@ pub extern fn kernel_main(mb2_header: usize) {
 
     interrupts::init();
     interrupts::test_idt();
+
+    loop {}
 }
 
 #[lang = "eh_personality"]
