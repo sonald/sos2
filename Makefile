@@ -7,6 +7,7 @@ endif
 arch ?= x86_64
 target := $(arch)-sos2
 ldscript := src/kern/early.lds
+QEMU := qemu-system-x86_64 
 kernel := build/kernel
 kern_srcs := $(wildcard src/kern/arch/$(arch)/boot/*.asm)
 kern_objs := $(patsubst %.asm, build/%.o, $(kern_srcs))
@@ -16,6 +17,9 @@ all: $(kernel) sos2.iso
 
 # print makefile variable (for debug purpose)
 print-%: ; @echo $* = $($*)
+
+run:
+	$(QEMU) -cdrom sos2.iso -serial stdio -usb
 
 $(kernel): kern $(ldscript) $(kern_objs) $(rust_core)
 	@mkdir -p $(@D)

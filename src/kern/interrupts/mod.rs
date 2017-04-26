@@ -4,6 +4,7 @@ pub mod timer;
 pub use self::idt::*;
 pub use self::irq::{PIC_CHAIN, Irqs};
 use self::timer::{PIT, timer_handler};
+use ::kern::driver::keyboard::{KBD, keyboard_irq};
 use x86_64::instructions::interrupts as x86;
 
 use ::kern::console::LogLevel::*;
@@ -16,7 +17,8 @@ lazy_static! {
         idt.breakpoint = Entry::new(cs(), define_handler!(int3_handler) as u64);
         idt.divide_by_zero = Entry::new(cs(), define_handler!(divide_by_zero_handler) as u64);
 
-        idt.irqs[0] = Entry::new(cs(), define_handler!(timer_handler) as u64);
+        idt.irqs[Irqs::TIMER as usize-32] = Entry::new(cs(), define_handler!(timer_handler) as u64);
+        idt.irqs[Irqs::KBD as usize-32] = Entry::new(cs(), define_handler!(keyboard_irq) as u64);
 
         idt
     };
@@ -55,9 +57,12 @@ pub fn init() {
     IDT.load();
     unsafe {
         PIT.lock().init();
+        KBD.lock().init();
+
         PIC_CHAIN.lock().init();
         PIC_CHAIN.lock().enable(Irqs::IRQ2 as usize);
         PIC_CHAIN.lock().enable(Irqs::TIMER as usize);
+        PIC_CHAIN.lock().enable(Irqs::KBD as usize);
         x86::enable();
     }
 

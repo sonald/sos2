@@ -10,6 +10,8 @@ const PIC2_BASE: u16 = 0xA0;	/* IO base address for slave PIC */
 const IRQ_MASK: u16 = 0xffff & !(1<<2);
 
 /// vector numbers for IRQs
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub enum Irqs {
     TIMER = 32, // PIT
     KBD = 33,
@@ -62,15 +64,23 @@ pub static PIC_CHAIN: Mutex<PicChain> = Mutex::new(unsafe {PicChain::new()});
    rather than 8h and 70h, as configured by default */
  
 const ICW1_ICW4: u8 =	0x01;		/* ICW4 (not) needed */
+#[allow(dead_code)]
 const ICW1_SINGLE: u8 =	0x02;		/* Single (cascade) mode */
+#[allow(dead_code)]
 const ICW1_INTERVAL4: u8 =	0x04;		/* Call address interval 4 (8) */
+#[allow(dead_code)]
 const ICW1_LEVEL: u8 =	0x08;		/* Level triggered (edge) mode */
+#[allow(dead_code)]
 const ICW1_INIT: u8 =	0x10;		/* Initialization - required! */
 
 const ICW4_8086: u8 =	0x01;		/* 8086/88 (MCS-80/85) mode */
+#[allow(dead_code)]
 const ICW4_AUTO: u8 =	0x02;		/* Auto (normal) EOI */
+#[allow(dead_code)]
 const ICW4_BUF_SLAVE: u8 =	0x08;		/* Buffered mode/slave */
+#[allow(dead_code)]
 const ICW4_BUF_MASTER: u8 =	0x0C;		/* Buffered mode/master */
+#[allow(dead_code)]
 const ICW4_SFNM: u8 =	0x10;		/* Special fully nested (not) */
 
 impl PicChain {
@@ -116,7 +126,7 @@ impl PicChain {
     }
 
     pub unsafe fn eoi(&mut self, isr: usize) {
-        assert!(isr >= 0x0 && isr < 0x10);
+        assert!(isr < 0x10);
         if isr >= 8 {
             self.pics[1].eoi();
         }

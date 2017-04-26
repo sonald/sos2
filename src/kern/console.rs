@@ -109,6 +109,7 @@ impl Console {
         self.attr
     }
 
+    /// safely call f without potential deadlock of console
     pub fn with<F>(con: &Mutex<Console>, row: usize, col: usize, f: F) where F: FnOnce() {
         let old = con.lock().cursor;
         con.lock().update_cursor(row, col);

@@ -1,8 +1,6 @@
-use ::kern::arch::port::{UnsafePort, Port};
-use ::kern::arch::cpu::{cs, cr2};
+use ::kern::arch::port::Port;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use super::idt::*;
-use super::IDT;
 use super::irq::PIC_CHAIN;
 use spin::Mutex;
 use ::kern::console::LogLevel::*;
@@ -11,7 +9,7 @@ use ::kern::console::{Console, tty1};
 const FREQ: u32 = 1193180;
 const HZ: u32 = 100;
 
-static timer_ticks: AtomicUsize = AtomicUsize::new(0);
+static TIMER_TICKS: AtomicUsize = AtomicUsize::new(0);
 pub static PIT: Mutex<Timer> = Mutex::new(Timer::new());
 
 // common ports for PIT
@@ -51,10 +49,12 @@ pub extern "C" fn timer_handler(frame: &mut ExceptionStackFrame) {
     unsafe {
         PIC_CHAIN.lock().eoi(0);
     }
-    timer_ticks.fetch_add(1, Ordering::SeqCst);
-    Console::with(&tty1, 0, 60, || {
-        printk!(Critical, "tick: {}", timer_ticks.load(Ordering::Acquire));
-    });
     
+    let old = TIMER_TICKS.fetch_add(1, Ordering::SeqCst);
+    if (old + 1) % HZ as usize == 0 {
+        Console::with(&tty1, 0, 60, || {
+            printk!(Critical, "{}", TIMER_TICKS.load(Ordering::Acquire));
+        });
+    }
 }
 
