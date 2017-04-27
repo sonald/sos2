@@ -85,7 +85,7 @@ pub enum KeyCode {
     KEY_AT                = b'@' as u16,
     KEY_CARRET            = b'^' as u16,
 
-    KEY_RETURN            = b'\r' as u16,
+    KEY_RETURN            = b'\n' as u16,
     KEY_BACKSPACE         = b'\x08' as u16,
     KEY_ESCAPE            = 0x1001,
 
@@ -532,32 +532,47 @@ impl Keyboard {
     }
 
     fn set_shift_down(&mut self, val: bool) {
-        if let Some(ref mut st) = self.status {
-            if val {
-                st.insert(KB_SHIFT_DOWN);
-            } else {
-                st.remove(KB_SHIFT_DOWN);
-            }
+        match self.status {
+            Some(ref mut st) =>
+                if val {
+                    st.insert(KB_SHIFT_DOWN);
+                } else {
+                    st.remove(KB_SHIFT_DOWN);
+                },
+            None =>
+                if val {
+                    self.status = Some(KB_SHIFT_DOWN);
+                }
         }
     }
 
     fn set_ctrl_down(&mut self, val: bool) {
-        if let Some(ref mut st) = self.status {
-            if val {
-                st.insert(KB_CTRL_DOWN);
-            } else {
-                st.remove(KB_CTRL_DOWN);
-            }
+        match self.status {
+            Some(ref mut st) =>
+                if val {
+                    st.insert(KB_CTRL_DOWN);
+                } else {
+                    st.remove(KB_CTRL_DOWN);
+                },
+            None =>
+                if val {
+                    self.status = Some(KB_CTRL_DOWN);
+                }
         }
     }
 
     fn set_alt_down(&mut self, val: bool) {
-        if let Some(ref mut st) = self.status {
-            if val {
-                st.insert(KB_ALT_DOWN);
-            } else {
-                st.remove(KB_ALT_DOWN);
-            }
+        match self.status {
+            Some(ref mut st) =>
+                if val {
+                    st.insert(KB_ALT_DOWN);
+                } else {
+                    st.remove(KB_ALT_DOWN);
+                },
+            None =>
+                if val {
+                    self.status = Some(KB_ALT_DOWN);
+                }
         }
     }
 
@@ -615,8 +630,6 @@ pub extern "C" fn keyboard_irq(frame: &mut ExceptionStackFrame) {
     let mut kbd = KBD.lock();
     let data = kbd.kbe_wait_and_read();
 
-    //printk!(Info, "keypress!\n\r");
-
     if data == 0xE0 {
         _is_extended.store(true, Ordering::Relaxed);
         return;
@@ -635,7 +648,7 @@ pub extern "C" fn keyboard_irq(frame: &mut ExceptionStackFrame) {
             false if ((data & 0x7f) as usize) < _xtkb_scancode_std.len() =>
                 _xtkb_scancode_std[(data & 0x7f) as usize],
             _ => {
-                printk!(Warn, "weird scancode {}", data);
+                //printk!(Warn, "weird scancode {}", data);
                 KeyCode::KEY_UNKNOWN
             }
         };
@@ -652,16 +665,20 @@ pub extern "C" fn keyboard_irq(frame: &mut ExceptionStackFrame) {
         packet.status = KB_PRESS.bits();
         packet.keycode = match extended {
             true =>  get_extend_keycode(data),
-            false if (data as usize) < _xtkb_scancode_std.len() => _xtkb_scancode_std[data as usize],
+            false if (data as usize) < _xtkb_scancode_std.len() => 
+                _xtkb_scancode_std[data as usize],
             _ => {
-                printk!(Warn, "weird scancode {}", data);
+                //printk!(Warn, "weird scancode {}", data);
                 KeyCode::KEY_UNKNOWN
             }
         };
 
         //Make Code
         match packet.keycode {
-            KeyCode::KEY_LSHIFT | KeyCode::KEY_RSHIFT => kbd.set_shift_down(true),
+            KeyCode::KEY_LSHIFT | KeyCode::KEY_RSHIFT => {
+                kbd.set_shift_down(true);
+                printk!(Warn, "{:#?}\n\r", kbd.status);
+            },
             KeyCode::KEY_LCTRL | KeyCode::KEY_RCTRL => kbd.set_ctrl_down(true),
             KeyCode::KEY_LALT | KeyCode::KEY_RALT => kbd.set_alt_down(true),
             _ => {}

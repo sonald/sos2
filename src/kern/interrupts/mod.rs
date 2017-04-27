@@ -89,7 +89,7 @@ pub fn test_idt() {
     let mut count = 0;
 
     loop {
-        if count > 100 {
+        if count > 10 {
             break;
         }
 
