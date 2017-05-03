@@ -22,7 +22,9 @@ mboot_end:
 
 
 global early_start
-extern long_mode_start
+extern kernel_main
+
+KERNEL_VMA equ 0xffff880000000000
 
 section .text
 bits 32
@@ -41,15 +43,12 @@ early_start:
 	lgdt [early_gdt_pointer]
 
 	pop ebx
-	; when I switch to higher-half address kernel base, this should be changed 
-	; into a indirect jump
 	jmp CODE_SELECTOR:long_mode_start
 
-	mov dword [0xb8000], 0x4f6b4f4f ;Ok
 	hlt
 
-;; Is it necessary to map 1G identity adresses here?
 setup_early_pages:
+	;; Is it necessary to map 1G identity adresses here?
 	mov ecx, 0
 .loop:
 	mov eax, (1<<21) ;; 2M base
@@ -62,7 +61,7 @@ setup_early_pages:
 
 	;; map 0xfd00_0000 + 24M (12 x 2M-page) area for framebuffer usage
 	mov ecx, 3
-	mov eax, early_pd_base + 3 * 8 + 0x3
+	mov eax, framebuffer_pd + 0x3
 	mov [early_pdp_base + ecx * 8], eax
 
 	mov ecx, 0
@@ -75,6 +74,21 @@ setup_early_pages:
 	inc ecx
 	cmp ecx, 12
 	jne .loop2
+
+	;; map first 1G into higher half (0xffff_8800_0000_0000)
+	mov ecx, 272
+	mov eax, early_pdp_base_higher + 0x3
+	mov [early_pml4_base + ecx * 8], eax
+
+	mov ecx, 0
+.loop3:
+	mov eax, (1<<21) ;; 2M base
+	mul ecx
+	or eax, 0x83 ; add attrs
+	mov [early_pd_base_higher + ecx * 8], eax
+	inc ecx
+	cmp ecx, 512
+	jne .loop3
 
 	ret
 
@@ -187,6 +201,28 @@ is_cpuid_capable:
 	ret
 
 
+
+section .text
+bits 64
+long_mode_start:
+	; clear all other selectors, since they ignored by 64-bit sub-mode
+    mov ax, 0
+    mov ss, ax
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+
+	movsxd rdi, ebx
+	mov rax, KERNEL_VMA
+	add rdi, rax
+	mov rax, kernel_main
+	call rax
+
+	cli
+	hlt
+
+
 LONG_MODE_BIT equ (1<<21)
 PRESENT_BIT  equ  (1<<15)
 CODE_SEG_BITS equ (3<<11)
@@ -216,8 +252,17 @@ early_pdp_base:
 	dq early_pd_base + 0x3 ; S,R/W,P
 	times (0x200 - 1) dq 0
 early_pd_base:
-	dq 0x83 ; S,R/W,P + 2M
+	times 0x200 dq 0
+
+framebuffer_pd:
+	times 0x200 dq 0
+
+;; entries for higher-half
+early_pdp_base_higher:
+	dq early_pd_base_higher + 0x3 ; S,R/W,P
 	times (0x200 - 1) dq 0
+early_pd_base_higher:
+	times 0x200 dq 0
 
 section .early_stack nobits
 _kern_stack:

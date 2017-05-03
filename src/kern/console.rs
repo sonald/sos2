@@ -76,8 +76,9 @@ fn contract_cursor(row: usize, col: usize) -> usize {
 
 impl Console {
     const fn new() -> Console {
+        use ::kern::memory::KERNEL_MAPPING;
         Console {
-            buf: unsafe { Unique::new(0xb8000 as *mut _) },
+            buf: unsafe { Unique::new((KERNEL_MAPPING.KernelMap.start + 0xb8000) as *mut _) },
             cursor: 0,
             attr: Attribute::new(Color::White, Color::Black),
             crtc_reg: Port::new(CRTC_ADDR_REG),

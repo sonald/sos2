@@ -1,6 +1,6 @@
 use super::frame::{Frame, FrameAllocator, FrameRange, AreaFrameAllocator};
 use super::mapper::Mapper;
-use super::PAGE_SIZE;
+use super::{PAGE_SIZE, KERNEL_MAPPING};
 use super::inactive::{InactivePML4Table, TemporaryPage};
 #[macro_use] use kern::console as con;
 use con::LogLevel::*;
@@ -109,7 +109,8 @@ impl PageEntry {
     }
     
     pub fn set(&mut self, frame: Frame, flags: EntryFlags) {
-        assert!(frame.start_address() & !AddressBitsMask == 0);
+        assert!(frame.start_address() & !AddressBitsMask == 0,
+            "frame address unaligned {:#x}", frame.start_address());
         self.0 = frame.start_address() | flags.bits();
     }
 }
@@ -272,6 +273,7 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
         InactivePML4Table::new(frame, &mut active, &mut temp_page)
     };
 
+    //TODO: need to move kernel stack into high address area
     active.with(&mut new_map, &mut temp_page, |mapper| {
         let elf = mbinfo.elf_sections_tag().expect("elf sections is unavailable");
         for sect in elf.sections() {
@@ -290,20 +292,40 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
             assert!(sect.start_address() % PAGE_SIZE == 0, "section {:?} not page aligned", sect);
             assert!(sect.end_address() % PAGE_SIZE == 0, "section {:?} not page aligned", sect);
 
-            let r = FrameRange {
-                start: Frame::from_paddress(sect.start_address()),
-                end: Frame::from_paddress(sect.end_address() - 1) + 1,
-            };
+            let kernel_base = KERNEL_MAPPING.KernelMap.start;
+            if sect.start_address() >= kernel_base {
+                let r = FrameRange {
+                    start: Frame::from_paddress(sect.start_address() - kernel_base),
+                    end: Frame::from_paddress(sect.end_address() - 1 - kernel_base) + 1,
+                };
 
-            printk!(Info, "identity map section [{:#x}, {:#x}), flags: {:?}\n\r",
+                printk!(Info, "map section [{:#x}, {:#x}) -> [{:#x}, {:#x}], flags: {:?}\n\r",
+                    r.start.start_address(), r.end.start_address(),
+                    r.start.start_address() + kernel_base, r.end.start_address() + kernel_base,
+                    flags);
+                for f in r {
+                    let page = Page::from_vaddress(f.start_address() + kernel_base);
+                    mapper.map_to(page, f, flags, allocator);
+                }
+            } else {
+                //those below kernel_base belongs to boot stage, and dont need anymore
+                //only stack needed
+                let r = FrameRange {
+                    start: Frame::from_paddress(sect.start_address()),
+                    end: Frame::from_paddress(sect.end_address() - 1) + 1,
+                };
+
+                printk!(Info, "identity map section [{:#x}, {:#x}), flags: {:?}\n\r",
                 r.start.start_address(), r.end.start_address(), flags);
-            for f in r {
-                mapper.identity_map(f, flags, allocator);
+                for f in r {
+                    mapper.identity_map(f, flags, allocator);
+                }
             }
         }
 
 
         // map framebuffer
+        let kernel_base = KERNEL_MAPPING.KernelMap.start;
         let fb = mbinfo.framebuffer_tag().expect("no framebuffer tag");
         let r = {
             let (start, sz) = (fb.addr as usize, fb.pitch * fb.height * (fb.bpp as u32)/8);
@@ -312,22 +334,25 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
                 end: Frame::from_paddress(start + sz as usize - 1) + 1,
             }
         };
-        printk!(Info, "identity map framebuffer\n\r");
+        printk!(Info, "map framebuffer\n\r");
         for f in r {
-            mapper.identity_map(f, WRITABLE, allocator);
+            let page = Page::from_vaddress(f.start_address() + kernel_base);
+            mapper.map_to(page, f, WRITABLE, allocator);
         }
 
         {
             // map mbinfo
             let r = {
                 FrameRange {
-                    start: Frame::from_paddress(mbinfo.start_address()),
-                    end: Frame::from_paddress(mbinfo.end_address() - 1) + 1,
+                    start: Frame::from_paddress(mbinfo.start_address() - kernel_base),
+                    end: Frame::from_paddress(mbinfo.end_address() - 1 - kernel_base) + 1,
                 }
             };
-            printk!(Info, "identity map mbinfo({:#x})\n\r", mbinfo.start_address());
+            printk!(Info, "map mbinfo({:#x} -> {:#x})\n\r", mbinfo.start_address() - kernel_base,
+                mbinfo.start_address());
             for f in r {
-                mapper.identity_map(f, EntryFlags::empty(), allocator);
+                let page = Page::from_vaddress(f.start_address() + kernel_base);
+                mapper.map_to(page, f, EntryFlags::empty(), allocator);
             }
         }
 
@@ -373,11 +398,11 @@ pub fn test_paging_before_remap<A>(allocator: &mut A) where A: FrameAllocator {
         assert!(p.next_level_table(1).is_none());
     }
 
-    {
-        let fb: VirtualAddress = 0xfd00_0000;
-        pml4.translate(fb).expect("fb mapping failed");
-        assert!(pml4.translate(fb).unwrap() == fb);
-    }
+    //{
+        //let fb: VirtualAddress = 0xfd00_0000;
+        //pml4.translate(fb).expect("fb mapping failed");
+        //assert!(pml4.translate(fb).unwrap() == fb);
+    //}
 
     {
         let vs = [0x3000_0000, 0x2000_0030, 0x1002_5030, 0x0702_5030];

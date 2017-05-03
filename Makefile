@@ -6,7 +6,7 @@ else
 endif
 arch ?= x86_64
 target := $(arch)-sos2
-ldscript := src/kern/early.lds
+ldscript := src/kern/kernel.lds
 QEMU := qemu-system-x86_64 
 kernel := build/kernel
 kern_srcs := $(wildcard src/kern/arch/$(arch)/boot/*.asm)

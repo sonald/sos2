@@ -6,6 +6,8 @@
 #![feature(alloc, collections)]
 #![feature(naked_functions)]
 #![feature(core_intrinsics)]
+// stabled since 1.17
+#![feature(field_init_shorthand)]
 #![no_std]
 
 extern crate rlibc;
