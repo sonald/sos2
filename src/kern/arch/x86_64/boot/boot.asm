@@ -216,6 +216,7 @@ long_mode_start:
 	movsxd rdi, ebx
 	mov rax, KERNEL_VMA
 	add rdi, rax
+	add rsp, rax
 	mov rax, kernel_main
 	call rax
 

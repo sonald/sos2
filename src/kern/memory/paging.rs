@@ -308,8 +308,7 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
                     mapper.map_to(page, f, flags, allocator);
                 }
             } else {
-                //those below kernel_base belongs to boot stage, and dont need anymore
-                //only stack needed
+                //FIXME: better setup a new gdt, then we need not to identity_map this area
                 let r = FrameRange {
                     start: Frame::from_paddress(sect.start_address()),
                     end: Frame::from_paddress(sect.end_address() - 1) + 1,
@@ -319,6 +318,9 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
                 r.start.start_address(), r.end.start_address(), flags);
                 for f in r {
                     mapper.identity_map(f, flags, allocator);
+
+                    let page = Page::from_vaddress(f.start_address() + kernel_base);
+                    mapper.map_to(page, f, flags, allocator);
                 }
             }
         }
@@ -360,8 +362,10 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
 
     let old_map = switch(new_map);
     printk!(Info, "switching kernel map from {:?} to {:?}\n\r", old_map, new_map);
-    // we can use frame as vaddr since it's identity-mapped
-    let old_pml4_page = Page::from_vaddress(old_map.pml4_frame.start_address());
+    let old_pml4_page = {
+        let kernel_base = KERNEL_MAPPING.KernelMap.start;
+        Page::from_vaddress(old_map.pml4_frame.start_address() + kernel_base)
+    };
     // unmap old pml4 page as kernel stack guard page (boot.asm:early_pml4_base)
     // so kernel can now use 18KB stack
     active.unmap(old_pml4_page, allocator);

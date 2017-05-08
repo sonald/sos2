@@ -108,7 +108,7 @@ impl Mapper {
     //TODO: support huge page
     pub fn unmap<A>(&mut self, page: Page, allocator: &mut A) where A: FrameAllocator {
         let vaddr = page.start_address() as VirtualAddress;
-        assert!(self.translate(vaddr).is_some());
+        assert!(self.translate(vaddr).is_some(), "vaddr {:#x} doest exist in mapping", vaddr);
 
         let p3 = self.next_level_table_mut(vaddr.pml4t_index());
 
