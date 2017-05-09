@@ -35,11 +35,12 @@ impl KHeapAllocator {
         }
 
         let start = align_up(self.current, align);
-        self.current = start + size;
-        if self.current > range.end {
+        let end = start.saturating_add(size);
+        if end > range.end {
             return None;
         }
 
+        self.current = end;
         Some(start as *mut u8)
     }
 
@@ -61,9 +62,9 @@ pub extern fn __rust_reallocate(ptr: *mut u8, _old_size: usize, size: usize,
                                 _align: usize) -> *mut u8 {
     let new_ptr = KHEAP_ALLOCATOR.lock().alloc(size, _align).expect("oom");
     unsafe {
-        use core::ptr::copy_nonoverlapping;
+        use core::ptr::copy;
         use core::cmp;
-        copy_nonoverlapping(ptr, new_ptr, cmp::min(size, _old_size));
+        copy(ptr, new_ptr, cmp::min(size, _old_size));
     }
     __rust_deallocate(ptr, _old_size, _align);
 
