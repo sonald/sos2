@@ -294,6 +294,7 @@ pub fn _print(args: ::core::fmt::Arguments) -> ::core::fmt::Result {
     con.write_fmt(args)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogLevel {
     Debug,
     Normal,
@@ -306,22 +307,24 @@ macro_rules! printk {
     ($lv:expr, $($arg:tt)*) => ({
         use $crate::kern::console::*;
 
-        let attr = match $lv {
-            LogLevel::Debug => Attribute::new(Color::Green, Color::Black),
-            LogLevel::Normal => Attribute::new(Color::White, Color::Black),
-            LogLevel::Info => Attribute::new(Color::Cyan, Color::Black),
-            LogLevel::Warn => Attribute::new(Color::Red, Color::Black),
-            LogLevel::Critical => Attribute::new(Color::LightRed, Color::White),
-        };
+        if $lv != LogLevel::Debug || cfg!(feature = "kdebug") {
+            let attr = match $lv {
+                LogLevel::Debug => Attribute::new(Color::Green, Color::Black),
+                LogLevel::Normal => Attribute::new(Color::White, Color::Black),
+                LogLevel::Info => Attribute::new(Color::Cyan, Color::Black),
+                LogLevel::Warn => Attribute::new(Color::Red, Color::Black),
+                LogLevel::Critical => Attribute::new(Color::LightRed, Color::White),
+            };
 
-        let old_attr = {
-            let mut con = tty1.lock();
-            con.set_attr(attr)
-        };
-        print!( $($arg)* );
-        {
-            let mut con = tty1.lock();
-            con.set_attr(old_attr);
+            let old_attr = {
+                let mut con = tty1.lock();
+                con.set_attr(attr)
+            };
+            print!( $($arg)* );
+            {
+                let mut con = tty1.lock();
+                con.set_attr(old_attr);
+            }
         }
     });
 }

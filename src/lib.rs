@@ -39,19 +39,6 @@ fn busy_wait () {
     }
 }
 
-#[allow(dead_code)]
-fn print_test() {
-    for i in 1..24 {
-        printk!(Info, "#{} \t{} \t{}\n\r", i, i, i);
-        busy_wait();
-    }
-
-    printk!(Debug, "values: {}, {}, {}\n\r", "hello", 12 / 5, 12.34 / 3.145);
-    printk!(Debug, "{}\n\r", {println!("inner"); "outer"});
-    printk!(Warn, "kernel log\n\r");
-    printk!(Critical, "kernel log\n\r");
-}
-
 /// test rgb framebuffer drawing
 fn display(fb: &multiboot2::FramebufferTag) {
     use core::ptr::*;
@@ -121,16 +108,22 @@ pub extern fn kernel_main(mb2_header: usize) {
     let (pa, pe) = unsafe {
         (&_start as *const _ as u64, &_end as *const _ as u64)
     };
-    printk!(Info, "_start {:#X}, _end {:#X}\n\r", pa, pe);
+    printk!(Debug, "_start {:#X}, _end {:#X}\n\r", pa, pe);
 
     let fb = mbinfo.framebuffer_tag().expect("framebuffer tag is unavailale");
-    display(&fb);
+    if cfg!(feature = "test") {
+        display(&fb);
+    }
 
     memory::init(&mbinfo);
-    test_kheap_allocator();
+    if cfg!(feature = "test") {
+        test_kheap_allocator();
+    }
 
     interrupts::init();
-    interrupts::test_idt();
+    if cfg!(feature = "test") {
+        interrupts::test_idt();
+    }
 
     loop {}
 }

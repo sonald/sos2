@@ -81,14 +81,15 @@ pub fn init(mbinfo: &BootInformation) {
             end: Frame::from_paddress(mb_end - 1) + 1,
         };
         let mut afa = AreaFrameAllocator::new(mmap.memory_areas(), kr, mr);
-        {
+
+        if cfg!(feature = "test") {
             test_frame_allocator(&mut afa);
             test_paging_before_remap(&mut afa);
         }
         ::kern::arch::cpu::enable_nxe_bit();
         ::kern::arch::cpu::enable_write_protect_bit();
         remap_the_kernel(&mut afa, &mbinfo);
-        {
+        if cfg!(feature = "test") {
             test_frame_allocator(&mut afa);
             test_paging_after_remap(&mut afa);
         }
@@ -115,7 +116,7 @@ pub fn init(mbinfo: &BootInformation) {
                 start += 1;
             }
         }
-        printk!(Critical, "Pass All Tests!!!!!\n\r");
+        printk!(Debug, "Pass All Tests!!!!!\n\r");
     });
 }
 

@@ -30,7 +30,7 @@ build/%.o: %.asm
 	nasm -f elf64 $< -o $@
 
 kern: 
-	xargo build --target=$(target)
+	xargo build --target=$(target) --features "test kdebug"
 
 
 sos2.iso: $(kernel) 

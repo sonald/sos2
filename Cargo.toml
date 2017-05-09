@@ -28,3 +28,10 @@ panic = "abort"
 # The release profile, used for `cargo build --release`.
 [profile.release]
 panic = "abort"
+
+[features]
+# no features by default
+default = []
+
+test = []
+kdebug = []
