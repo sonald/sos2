@@ -5,32 +5,38 @@
 #![no_std]
 
 extern crate spin;
-use spin::Mutex;
+use spin::{Mutex, Once};
+use core::sync::atomic::{AtomicBool, Ordering};
+use core::ops::Range;
 
 pub struct KHeapAllocator {
-    heap_start: usize,
-    heap_size: usize,
-    current: usize
+    pub current: usize,
 }
 
 fn align_up(start: usize, align: usize) -> usize {
     ((start + align - 1) / align) * align
 }
 
+/// this should be inited inside kernel
+pub static HEAP_RANGE: Once<Range<usize>> = Once::new();
+
 impl KHeapAllocator {
     /// [start, start+sz) virtual address space for allocator
-    pub const fn new(start: usize, sz: usize) -> KHeapAllocator {
+    pub const fn new() -> KHeapAllocator {
         KHeapAllocator {
-            heap_start: start,
-            heap_size: sz,
-            current: start
+            current: 0,
         }
     }
 
     pub fn alloc(&mut self, size: usize, align: usize) -> Option<*mut u8> {
+        let range = HEAP_RANGE.try().expect("kheap is not initialized!");
+        if self.current == 0 {
+            self.current = range.start;
+        }
+
         let start = align_up(self.current, align);
         self.current = start + size;
-        if self.current - self.heap_start >= self.heap_size {
+        if self.current > range.end {
             return None;
         }
 
@@ -39,10 +45,7 @@ impl KHeapAllocator {
 
 }
 
-///NOTE: start address should be adjusted according to kernel size and mbinfo 
-pub const START_ADDRESS: usize = 0x200_000;
-pub const ALLOC_SIZE: usize = 0x1000 * 1024;
-static KHEAP_ALLOCATOR: Mutex<KHeapAllocator> = Mutex::new(KHeapAllocator::new(START_ADDRESS, ALLOC_SIZE));
+pub static KHEAP_ALLOCATOR: Mutex<KHeapAllocator> = Mutex::new(KHeapAllocator::new());
 
 #[no_mangle]
 pub extern fn __rust_allocate(size: usize, _align: usize) -> *mut u8 {

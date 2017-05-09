@@ -40,6 +40,10 @@ pub const KERNEL_MAPPING: MemorySchema = MemorySchema {
 static INIT: spin::Once<()> = spin::Once::new();
 
 pub fn init(mbinfo: &BootInformation) {
+    #[inline]
+    fn align_up(start: usize, align: usize) -> usize {
+        ((start + align - 1) / align) * align
+    }
 
     INIT.call_once(|| {
         printk!(Info, "memory system init.\n\r");
@@ -92,10 +96,19 @@ pub fn init(mbinfo: &BootInformation) {
         {
             //map kheap area
             //TODO: should be lazily mapped after page fault sets up
-            let mut active = ActivePML4Table::new();
-            let mut start = kheap_allocator::START_ADDRESS / PAGE_SIZE;
-            let end = (kheap_allocator::START_ADDRESS + kheap_allocator::ALLOC_SIZE - 1) / PAGE_SIZE + 1;
+            let start_address = align_up(mbinfo.end_address(), PAGE_SIZE);
+            let alloc_size = 0x1000 * 1024;
+            kheap_allocator::HEAP_RANGE.call_once(|| {
+                Range {
+                    start: start_address,
+                    end: start_address + alloc_size
+                }
+            });
 
+            let mut active = ActivePML4Table::new();
+            let mut start = start_address / PAGE_SIZE;
+            let end = (start_address + alloc_size - 1) / PAGE_SIZE + 1;
+            printk!(Info, "map heap [{:#x}, {:#x})\n\r", start_address, start_address + alloc_size);
             while start < end {
                 let page = Page::from_vaddress(start * PAGE_SIZE);
                 active.map(page, WRITABLE, &mut afa);
