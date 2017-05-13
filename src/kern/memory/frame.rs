@@ -46,6 +46,15 @@ impl Iterator for FrameRange {
     }
 }
 
+impl FrameRange {
+    pub fn new(start: usize, end: usize) -> FrameRange {
+        FrameRange {
+            start: Frame::from_paddress(start),
+            end: Frame::from_paddress(end-1) + 1
+        }
+    }
+}
+
 impl Frame {
     pub const fn from_paddress(physical: usize) -> Frame {
         Frame {number: physical / PAGE_SIZE }

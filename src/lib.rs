@@ -115,12 +115,12 @@ pub extern fn kernel_main(mb2_header: usize) {
         display(&fb);
     }
 
-    memory::init(&mbinfo);
+    let mut mm = memory::init(&mbinfo);
     if cfg!(feature = "test") {
         test_kheap_allocator();
     }
 
-    interrupts::init();
+    interrupts::init(&mut mm);
     if cfg!(feature = "test") {
         interrupts::test_idt();
     }

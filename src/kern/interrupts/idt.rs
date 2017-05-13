@@ -1,6 +1,7 @@
 use core::marker::PhantomData;
 use core::mem::size_of;
 use bit_field::BitField;
+use x86_64::instructions::tables::{lidt, DescriptorTablePointer};
 
 pub type HandlerFunc = extern "C" fn (&mut ExceptionStackFrame);
 pub type HandlerFuncWithErrCode = extern "C" fn (&mut ExceptionStackFrame, u64);
@@ -25,7 +26,8 @@ impl EntryOptions {
 
     // set interrupt stack table index
     pub fn set_ist_index(&mut self, ist: u16) -> &mut Self {
-        self.0.set_bits(0..3, ist);
+        assert!(ist < 7, "IST index is invalid");
+        self.0.set_bits(0..3, ist + 1);
         self
     }
 
@@ -86,6 +88,10 @@ impl Entry {
 
     pub fn empty() -> Entry {
         Entry::new(0, 0)
+    }
+
+    pub fn options(&mut self) -> &mut EntryOptions {
+        &mut self.options
     }
 }
 
@@ -260,24 +266,14 @@ impl InterruptDescriptorTable {
         }
     }
 
-    pub fn load(&self) {
+    pub fn load(&'static self) {
         let dtp = DescriptorTablePointer {
             base: self as *const _ as u64,
             limit: (size_of::<Self>() - 1) as u16,
         };
-        unsafe { load_idt(&dtp); }
+        unsafe { lidt(&dtp); }
     }
 }
 
-#[derive(Debug)]
-#[repr(C, packed)]
-pub struct DescriptorTablePointer {
-    limit: u16,
-    base: u64,
-}
-
-pub unsafe fn load_idt(idt: &DescriptorTablePointer) {
-    asm!("lidt ($0)" :: "r"(idt) : "memory");
-}
 
 

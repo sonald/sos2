@@ -1,3 +1,4 @@
+use core::ops::{Range, Add, AddAssign};
 use super::frame::{Frame, FrameAllocator, FrameRange, AreaFrameAllocator};
 use super::mapper::Mapper;
 use super::{PAGE_SIZE, KERNEL_MAPPING};
@@ -6,9 +7,28 @@ use super::inactive::{InactivePML4Table, TemporaryPage};
 use con::LogLevel::*;
 use multiboot2::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Page {
     number: usize
+}
+
+///TODO: use KERNEL_MAPPING to validate page number 
+impl Add<usize> for Page {
+    type Output = Page;
+    fn add(self, rhs: usize) -> Page {
+        Page {number: self.number + rhs}
+    }
+}
+
+impl AddAssign<isize> for Page {
+    fn add_assign(&mut self, mut inc: isize) {
+        if inc.is_negative() {
+            assert!(self.number + inc.abs() as usize > 0, "page number should not below zero");
+            self.number -= inc.abs() as usize;
+        } else {
+            self.number += inc as usize;
+        }
+    }
 }
 
 impl Page {
@@ -21,6 +41,34 @@ impl Page {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct PageRange {
+    pub start: Page,
+    pub end: Page // exclusive
+}
+
+impl Iterator for PageRange {
+    type Item = Page;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.start < self.end {
+            let f = self.start;
+            self.start += 1;
+            Some(f)
+        } else {
+            None
+        }
+    }
+}
+
+impl PageRange {
+    pub fn new(start: usize, end: usize) -> PageRange {
+        PageRange {
+            start: Page::from_vaddress(start),
+            end: Page::from_vaddress(end-1) + 1
+        }
+    }
+}
 
 bitflags! {
     // for PML4, PDPT, PDT, PT entries,
@@ -294,10 +342,8 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
 
             let kernel_base = KERNEL_MAPPING.KernelMap.start;
             if sect.start_address() >= kernel_base {
-                let r = FrameRange {
-                    start: Frame::from_paddress(sect.start_address() - kernel_base),
-                    end: Frame::from_paddress(sect.end_address() - 1 - kernel_base) + 1,
-                };
+                let r = FrameRange::new(sect.start_address() - kernel_base,
+                    sect.end_address() - kernel_base);
 
                 printk!(Info, "map section [{:#x}, {:#x}) -> [{:#x}, {:#x}], flags: {:?}\n\r",
                     r.start.start_address(), r.end.start_address(),
@@ -309,10 +355,7 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
                 }
             } else {
                 //FIXME: better setup a new gdt, then we need not to identity_map this area
-                let r = FrameRange {
-                    start: Frame::from_paddress(sect.start_address()),
-                    end: Frame::from_paddress(sect.end_address() - 1) + 1,
-                };
+                let r = FrameRange::new(sect.start_address(), sect.end_address());
 
                 printk!(Info, "identity map section [{:#x}, {:#x}), flags: {:?}\n\r",
                 r.start.start_address(), r.end.start_address(), flags);
@@ -331,10 +374,7 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
         let fb = mbinfo.framebuffer_tag().expect("no framebuffer tag");
         let r = {
             let (start, sz) = (fb.addr as usize, fb.pitch * fb.height * (fb.bpp as u32)/8);
-            FrameRange {
-                start: Frame::from_paddress(start),
-                end: Frame::from_paddress(start + sz as usize - 1) + 1,
-            }
+            FrameRange::new(start, start + sz as usize)
         };
         printk!(Info, "map framebuffer\n\r");
         for f in r {
@@ -344,12 +384,8 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
 
         {
             // map mbinfo
-            let r = {
-                FrameRange {
-                    start: Frame::from_paddress(mbinfo.start_address() - kernel_base),
-                    end: Frame::from_paddress(mbinfo.end_address() - 1 - kernel_base) + 1,
-                }
-            };
+            let r = FrameRange::new(mbinfo.start_address() - kernel_base,
+                mbinfo.end_address() - kernel_base);
             printk!(Info, "map mbinfo({:#x} -> {:#x})\n\r", mbinfo.start_address() - kernel_base,
                 mbinfo.start_address());
             for f in r {

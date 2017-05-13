@@ -10,13 +10,6 @@ pub fn tlb_flush_all() {
     unsafe { cr3_set(cr3()) }
 }
 
-/// Returns the current value of the code segment register.
-pub fn cs() -> u16 {
-    let segment: u16;
-    unsafe { asm!("mov %cs, $0" : "=r" (segment) ) };
-    segment
-}
-
 /// read pml4 pointer from cr3
 pub fn cr3() -> PhysicalAddress {
     let ret: usize;
