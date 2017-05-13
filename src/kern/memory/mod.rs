@@ -21,8 +21,9 @@ use con::LogLevel::*;
 /// ref: https://www.kernel.org/doc/Documentation/x86/x86_64/mm.txt
 /// 0000000000000000 - 00007fffffffffff (=47 bits) user space, different per mm
 /// hole caused by [48:63] sign extension
-/// ffff800000000000 - ffff87ffffffffff (=32G) direct mapping of all phys. memory
-/// ffff880000000000 - ffff8800ffffffff (=1 GB)  kernel text mapping, from phys 0
+/// ffff800000000000 - ffff8007ffffffff (=32G) direct mapping of all phys. memory
+/// ffff800800000000 - ffff87ffffffffff (=43bits) reserved now
+/// ffff880000000000 - ffff8800ffffffff (=4G)  kernel mapping, from phys 0
 pub struct MemorySchema {
     pub UserMap: Range<usize>,
     pub Invalid: Range<usize>, // hardware hole
@@ -33,7 +34,7 @@ pub struct MemorySchema {
 pub const KERNEL_MAPPING: MemorySchema = MemorySchema {
     UserMap: Range {start: 0, end: 0x7fff_ffffffff},
     Invalid: Range {start: 0x8000_00000000, end: 0xffff7fff_ffffffff},
-    PhysicalDirectMap: Range {start: 0xffff8000_00000000, end: 0xffff87ff_ffffffff},
+    PhysicalDirectMap: Range {start: 0xffff8000_00000000, end: 0xffff8007_ffffffff},
     KernelMap: Range {start: 0xffff8800_00000000, end: 0xffff8800_ffffffff},
 };
 

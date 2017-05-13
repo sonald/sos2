@@ -17,9 +17,10 @@ impl Add<usize> for Frame {
 }
 
 impl AddAssign<isize> for Frame {
-    fn add_assign(&mut self, inc: isize) {
-        if inc < 0 {
-            self.number -= (-inc) as usize;
+    fn add_assign(&mut self, mut inc: isize) {
+        if inc.is_negative() {
+            assert!(self.number + inc.abs() as usize > 0, "frame number should not below zero");
+            self.number -= inc.abs() as usize;
         } else {
             self.number += inc as usize;
         }

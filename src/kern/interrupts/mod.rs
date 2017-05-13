@@ -71,14 +71,7 @@ pub fn init() {
 pub fn test_idt() {
     unsafe { asm!("int3"); }
     printk!(Debug, "after int3\n\r");
-    //unsafe {
-        //asm!("mov dx, 0; div dx":::"dx":"intel");
-    //}
-    //printk!(Debug, "after divide_by_zero\n\r");
-    //unsafe {
-        //let ptr = 0xdeedbeef as *mut u8;
-        //*ptr = 12;
-    //}
+
     let busy_wait =|| {
         for _ in 1..50000 {
             ::kern::util::cpu_relax();

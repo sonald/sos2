@@ -266,7 +266,7 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
     let mut active = ActivePML4Table::new();
     //FIXME: this magic address should be taken care of, prevent from conflicting
     //with normal addresses, maybe mark it with unusable
-    let mut temp_page = TemporaryPage::new(Page::from_vaddress(0x0_cafebeef_000), allocator);
+    let mut temp_page = TemporaryPage::new(Page::from_vaddress(0xfffff_cafe_beef_000), allocator);
 
     let mut new_map = {
         let frame = allocator.alloc_frame().expect("no more memory");
