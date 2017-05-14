@@ -62,7 +62,7 @@ impl Iterator for PageRange {
 }
 
 impl PageRange {
-    pub fn new(start: usize, end: usize) -> PageRange {
+    pub fn new(start: VirtualAddress, end: VirtualAddress) -> PageRange {
         PageRange {
             start: Page::from_vaddress(start),
             end: Page::from_vaddress(end-1) + 1
@@ -345,7 +345,7 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
                 let r = FrameRange::new(sect.start_address() - kernel_base,
                     sect.end_address() - kernel_base);
 
-                printk!(Info, "map section [{:#x}, {:#x}) -> [{:#x}, {:#x}], flags: {:?}\n\r",
+                printk!(Info, "map section [{:#x}, {:#x}) -> [{:#x}, {:#x}), flags: {:?}\n\r",
                     r.start.start_address(), r.end.start_address(),
                     r.start.start_address() + kernel_base, r.end.start_address() + kernel_base,
                     flags);
@@ -354,20 +354,25 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
                     mapper.map_to(page, f, flags, allocator);
                 }
             } else {
-                //FIXME: better setup a new gdt, then we need not to identity_map this area
-                let r = FrameRange::new(sect.start_address(), sect.end_address());
+                //gdt's been replaced later with a new one, only the stack needed here
+                //make the whole area (including booting code) for stack
+                let mut r = FrameRange::new(sect.start_address(), sect.end_address());
 
-                printk!(Info, "identity map section [{:#x}, {:#x}), flags: {:?}\n\r",
-                r.start.start_address(), r.end.start_address(), flags);
+                flags = PRESENT | NO_EXECUTE | WRITABLE;
+                printk!(Info, "map boot section [{:#x}, {:#x}) -> [{:#x}, {:#x}), flags: {:?} as stack\n\r",
+                    r.start.start_address(), r.end.start_address(),
+                    r.start.start_address() + kernel_base, r.end.start_address() + kernel_base,
+                    flags);
+                printk!(Info, "skip {:#x} as stack guard\n\r", r.start.start_address());
+                // guard page
+                r.next();
                 for f in r {
-                    mapper.identity_map(f, flags, allocator);
-
                     let page = Page::from_vaddress(f.start_address() + kernel_base);
                     mapper.map_to(page, f, flags, allocator);
                 }
+
             }
         }
-
 
         // map framebuffer
         let kernel_base = KERNEL_MAPPING.KernelMap.start;
@@ -398,14 +403,6 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
 
     let old_map = switch(new_map);
     printk!(Info, "switching kernel map from {:?} to {:?}\n\r", old_map, new_map);
-    let old_pml4_page = {
-        let kernel_base = KERNEL_MAPPING.KernelMap.start;
-        Page::from_vaddress(old_map.pml4_frame.start_address() + kernel_base)
-    };
-    // unmap old pml4 page as kernel stack guard page (boot.asm:early_pml4_base)
-    // so kernel can now use 18KB stack
-    active.unmap(old_pml4_page, allocator);
-
 }
 
 pub fn switch(new_map: InactivePML4Table) -> InactivePML4Table {

@@ -76,7 +76,7 @@ static GDT: Once<GlobalDescriptorTable> = Once::new();
 
 pub fn init(mm: &mut MemoryManager) {
     use x86_64;
-    use x86_64::instructions::tables::{lgdt, load_tss};
+    use x86_64::instructions::tables::load_tss;
     use x86_64::instructions::segmentation::set_cs;
     use x86_64::structures::gdt::SegmentSelector;
 
@@ -120,20 +120,12 @@ pub fn init(mm: &mut MemoryManager) {
 }
 
 pub fn test_idt() {
-    unsafe { asm!("int3"); }
-    printk!(Debug, "after int3\n\r");
-
     let busy_wait =|| {
         for _ in 1..50000 {
             ::kern::util::cpu_relax();
         }
     };
     
-    fn overflow() {
-        overflow()
-    }
-    overflow();
-
     use ::kern::console::{tty1, Console};
     let mut count = 0;
 

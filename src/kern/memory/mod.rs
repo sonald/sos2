@@ -15,7 +15,7 @@ use spin;
 use kheap_allocator;
 use multiboot2::*;
 
-#[macro_use] use ::kern::console as con;
+use ::kern::console as con;
 use con::LogLevel::*;
 
 pub const PAGE_SIZE: usize = 4096;
@@ -46,7 +46,7 @@ pub const KERNEL_MAPPING: MemorySchema = MemorySchema {
 pub struct MemoryManager {
     pub activePML4Table: ActivePML4Table,
     pub areaFrameAllocator: AreaFrameAllocator,
-    pub stackAllocator: StackAllocator
+    pub stackAllocator: StackAllocator,
 }
 
 impl MemoryManager {
@@ -87,7 +87,6 @@ pub fn init(mbinfo: &BootInformation) -> MemoryManager {
     mbinfo.end_address() - kernel_base);
     printk!(Info, "mboot2 start: {:#x}, end: {:#x}\n\r", mb_start, mb_end);
 
-    use core::ops::Range;
     let kr = Range {
         start: Frame::from_paddress(kernel_start),
         end: Frame::from_paddress(kernel_end - 1) + 1,
@@ -149,7 +148,7 @@ fn test_frame_allocator(afa: &mut AreaFrameAllocator) {
     //printk!(Debug, "{:#?}\n\r", afa);
 
     let mut i = 0;
-    while let Some(f) = afa.alloc_frame() {
+    while let Some(_) = afa.alloc_frame() {
         //printk!(Warn, "0x{:x}  ", f.number);
         i += 1;
         if i == 100 { break }

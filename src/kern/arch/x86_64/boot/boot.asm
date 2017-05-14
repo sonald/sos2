@@ -22,6 +22,7 @@ mboot_end:
 
 
 global early_start
+global kern_stack_top
 extern kernel_main
 
 KERNEL_VMA equ 0xffff880000000000

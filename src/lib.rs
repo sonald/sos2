@@ -90,6 +90,7 @@ fn test_kheap_allocator() {
 extern {
     static _start: u64;
     static _end: u64;
+    static kern_stack_top: u64;
 }
 
 #[no_mangle]
@@ -105,10 +106,10 @@ pub extern fn kernel_main(mb2_header: usize) {
     let mbinfo = unsafe { multiboot2::load(mb2_header) };
     printk!(Info, "{:#?}\n\r", mbinfo);
 
-    let (pa, pe) = unsafe {
-        (&_start as *const _ as u64, &_end as *const _ as u64)
+    let (pa, pe, sp_top) = unsafe {
+        (&_start as *const _ as u64, &_end as *const _ as u64, &kern_stack_top as *const _ as u64)
     };
-    printk!(Debug, "_start {:#X}, _end {:#X}\n\r", pa, pe);
+    printk!(Debug, "_start {:#X}, _end {:#X}, sp top: {:#X}\n\r", pa, pe, sp_top);
 
     let fb = mbinfo.framebuffer_tag().expect("framebuffer tag is unavailale");
     if cfg!(feature = "test") {
