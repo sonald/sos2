@@ -311,6 +311,7 @@ impl ActivePML4Table {
 
 pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A: FrameAllocator {
 
+    let kernel_base = KERNEL_MAPPING.KernelMap.start;
     let mut active = ActivePML4Table::new();
     //FIXME: this magic address should be taken care of, prevent from conflicting
     //with normal addresses, maybe mark it with unusable
@@ -340,7 +341,6 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
             assert!(sect.start_address() % PAGE_SIZE == 0, "section {:?} not page aligned", sect);
             assert!(sect.end_address() % PAGE_SIZE == 0, "section {:?} not page aligned", sect);
 
-            let kernel_base = KERNEL_MAPPING.KernelMap.start;
             if sect.start_address() >= kernel_base {
                 let r = FrameRange::new(sect.start_address() - kernel_base,
                     sect.end_address() - kernel_base);
@@ -374,17 +374,34 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
             }
         }
 
-        // map framebuffer
-        let kernel_base = KERNEL_MAPPING.KernelMap.start;
         let fb = mbinfo.framebuffer_tag().expect("no framebuffer tag");
-        let r = {
-            let (start, sz) = (fb.addr as usize, fb.pitch * fb.height * (fb.bpp as u32)/8);
-            FrameRange::new(start, start + sz as usize)
-        };
-        printk!(Info, "map framebuffer\n\r");
-        for f in r {
-            let page = Page::from_vaddress(f.start_address() + kernel_base);
-            mapper.map_to(page, f, WRITABLE, allocator);
+        if (fb.addr != 0xb8000) {
+            // map base framebuffer (0xb8000)
+            let (fb_addr, pitch, height, bpp) = (0xb8000, 160, 25, 16);
+            let r = {
+                let (start, sz) = (fb_addr, pitch * height);
+                FrameRange::new(start, start + sz as usize)
+            };
+            printk!(Info, "map console framebuffer [{:#x}, {:#x})\n\r", 
+                    r.start.start_address(), r.end.start_address());
+            for f in r {
+                let page = Page::from_vaddress(f.start_address() + kernel_base);
+                mapper.map_to(page, f, WRITABLE, allocator);
+            }
+        }
+
+        {
+            // map framebuffer
+            let r = {
+                let (start, sz) = (fb.addr as usize, fb.pitch * fb.height);
+                FrameRange::new(start, start + sz as usize)
+            };
+            printk!(Info, "map framebuffer [{:#x}, {:#x})\n\r", 
+                    r.start.start_address(), r.end.start_address());
+            for f in r {
+                let page = Page::from_vaddress(f.start_address() + kernel_base);
+                mapper.map_to(page, f, WRITABLE, allocator);
+            }
         }
 
         {

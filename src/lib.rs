@@ -51,21 +51,19 @@ fn display(fb: &multiboot2::FramebufferTag) {
     }
 
     unsafe {
-        vga = fb.addr as *mut u32;
+        vga = (fb.addr + memory::KERNEL_MAPPING.KernelMap.start as u64) as *mut u32;
         let mut clr: u32 = 0;
 
-        for _ in 0..100 {
+        for g in 0..255 {
             for i in 0..fb.height {
                 let data = &[clr; 800];
                 let off = i * fb.width;
                 copy_nonoverlapping(data, vga.offset(off as isize) as *mut _, 1);
-                clr += 1;
-                if clr > 0x00ffffff {
-                    clr = 0;
-                }
+                let r: u32 = (256 * i / fb.height) as u32;
+                clr  = (g << 8) | (r <<16);
             }
 
-            busy_wait();
+            //busy_wait();
         }
     }
 }
@@ -112,11 +110,8 @@ pub extern fn kernel_main(mb2_header: usize) {
     printk!(Debug, "_start {:#X}, _end {:#X}, sp top: {:#X}\n\r", pa, pe, sp_top);
 
     let fb = mbinfo.framebuffer_tag().expect("framebuffer tag is unavailale");
-    if cfg!(feature = "test") {
-        display(&fb);
-    }
-
     let mut mm = memory::init(&mbinfo);
+
     if cfg!(feature = "test") {
         test_kheap_allocator();
     }
@@ -126,7 +121,12 @@ pub extern fn kernel_main(mb2_header: usize) {
         interrupts::test_idt();
     }
 
-    loop {}
+    if cfg!(feature = "test") {
+        display(&fb);
+    }
+    loop {
+        kern::util::cpu_relax();
+    }
 }
 
 #[lang = "eh_personality"]
