@@ -6,6 +6,7 @@
 #![feature(alloc, collections)]
 #![feature(naked_functions)]
 #![feature(core_intrinsics)]
+#![feature(core_slice_ext)]
 // stabled since 1.17
 #![feature(field_init_shorthand)]
 #![no_std]
@@ -31,6 +32,7 @@ use kern::driver::serial;
 use kern::memory;
 use kern::interrupts;
 use kheap_allocator as kheap;
+use kern::driver::video::framebuffer::{Framebuffer, Point, Rgba};
 
 #[allow(dead_code)]
 fn busy_wait () {
@@ -40,31 +42,59 @@ fn busy_wait () {
 }
 
 /// test rgb framebuffer drawing
-fn display(fb: &multiboot2::FramebufferTag) {
+fn display(fb: &mut Framebuffer) {
     use core::ptr::*;
     let vga;
 
-    printk!(Debug, "fb: {:#?}\n\r", fb);
-
-    if fb.frame_type != multiboot2::FramebufferType::Rgb {
-        return;
-    }
-
     unsafe {
-        vga = (fb.addr + memory::KERNEL_MAPPING.KernelMap.start as u64) as *mut u32;
+        vga = fb.get_mut() as *mut _;
         let mut clr: u32 = 0;
 
-        for g in 0..255 {
+        let w = fb.width;
+        for g in 0..1 {
             for i in 0..fb.height {
-                let data = &[clr; 800];
-                let off = i * fb.width;
-                copy_nonoverlapping(data, vga.offset(off as isize) as *mut _, 1);
+                fb.draw_line(Point{x:0, y:i as i32}, Point{x:w as i32-1, y: i as i32}, Rgba(clr));
+                //let data = &[clr; 800];
+                //let off = i * fb.width;
+                //copy_nonoverlapping(data, vga.offset(off as isize) as *mut _, 1);
                 let r: u32 = (256 * i / fb.height) as u32;
                 clr  = (g << 8) | (r <<16);
             }
 
             //busy_wait();
+            fb.draw_line(Point{x: 530, y: 120}, Point{x: 330, y: 10}, Rgba(0xeeeeeeee));
+            fb.draw_line(Point{x: 330, y: 120}, Point{x: 530, y: 10}, Rgba(0xeeeeeeee));
+            
+            fb.draw_line(Point{x: 300, y: 10}, Point{x: 500, y: 100}, Rgba(0xeeeeeeee));
+            fb.draw_line(Point{x: 300, y: 10}, Point{x: 400, y: 220}, Rgba(0xeeeeeeee));
+
+            fb.draw_line(Point{x: 100, y: 220}, Point{x: 300, y: 100}, Rgba(0xeeeeeeee));
+            fb.draw_line(Point{x: 100, y: 220}, Point{x: 300, y: 10}, Rgba(0xeeeeeeee));
+
+            for r in (100..150).filter(|x| x % 5 == 0) {
+                fb.draw_circle(Point{x: 200, y: 200}, r, Rgba::from(0, g as u8, 0xff));
+            }
+
+            fb.spread_circle(Point{x: 400, y: 100}, 90, Rgba::from(0, g as u8, 0xee));
+
+            fb.draw_rect(Point{x:199, y: 199}, 202, 102, Rgba::from(0x00, g as u8, 0xff));
+            fb.fill_rect(Point{x:200, y: 200}, 200, 100, Rgba::from(0x80, g as u8, 0x80));
+
+            fb.draw_rect(Point{x:199, y: 309}, 302, 102, Rgba::from(0x00, g as u8, 0xff));
+            fb.fill_rect(Point{x:200, y: 310}, 300, 100, Rgba::from(0xa0, g as u8, 0x80));
+
+            fb.draw_rect(Point{x:199, y: 419}, 392, 102, Rgba::from(0x00, g as u8, 0xff));
+            fb.fill_rect(Point{x:200, y: 420}, 390, 100, Rgba::from(0xe0, g as u8, 0x80));
+
+            fb.draw_char(Point{x:300, y: 550}, b'A', Rgba(0x000000ff), Rgba(0x00ff0000));
+            fb.draw_str(Point{x:40, y: 550}, b"Loading SOS...", Rgba(0x000000ff), Rgba(clr));
+
+            x86_64::instructions::interrupts::disable();
+            printk!(Debug, "loop {}\n\r", g);
+            x86_64::instructions::interrupts::enable();
         }
+
+
     }
 }
 
@@ -121,8 +151,9 @@ pub extern fn kernel_main(mb2_header: usize) {
         interrupts::test_idt();
     }
 
+    let mut fb = Framebuffer::new(&fb);
     if cfg!(feature = "test") {
-        display(&fb);
+        display(&mut fb);
     }
     loop {
         kern::util::cpu_relax();

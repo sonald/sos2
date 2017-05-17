@@ -375,7 +375,7 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
         }
 
         let fb = mbinfo.framebuffer_tag().expect("no framebuffer tag");
-        if (fb.addr != 0xb8000) {
+        if fb.addr != 0xb8000 {
             // map base framebuffer (0xb8000)
             let (fb_addr, pitch, height, bpp) = (0xb8000, 160, 25, 16);
             let r = {
