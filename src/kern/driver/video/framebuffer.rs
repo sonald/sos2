@@ -188,6 +188,60 @@ impl Framebuffer {
         self.draw_line(Point{x: l, y: b}, Point{x: r, y: b}, rgb);
     }
 
+    pub fn fill_rect_grad(&mut self, top_left: Point, width: i32, height: i32,
+                          from: Rgba, to: Rgba) {
+
+        fn interpolate(v0: i32, step: i32, range: i32, span: i32) -> i32 {
+            match span {
+                span if span != 0 => (v0 * span + step * range) / span,
+                _ => 0
+            }
+        }
+
+        fn interpolate_color(step: i32, from: Rgba, to: Rgba, span: i32) -> Rgba {
+            let (r, g, b) = (
+                interpolate(from.r() as i32, step, to.r() as i32 - from.r() as i32, span), 
+                interpolate(from.g() as i32, step, to.g() as i32 - from.g() as i32, span), 
+                interpolate(from.b() as i32, step, to.b() as i32 - from.b() as i32, span), 
+            );
+
+            Rgba::from(r as u8, g as u8, b as u8)
+        }
+
+        use core::ptr::copy_nonoverlapping;
+        use core::cmp::min;
+
+        let width = min(self.width as i32 - top_left.x, width);
+        let height = min(self.height as i32 - top_left.y, height);
+
+        let mut clr = from;
+
+        let base = top_left.y as isize * self.width as isize;
+        // our kernel stack is big enough for this whole block of data
+        for i in 0..height {
+            let data = &[clr; 256];
+            let mut off = base + i as isize * self.width as isize + top_left.x as isize;
+            let mut w = width;
+            while w >= 256 {
+                unsafe {
+                    copy_nonoverlapping(data,
+                        self.get_mut().offset(off + (width - w) as isize) as *mut _,
+                        1);
+                }
+                w -= 256;
+            }
+            if w > 0 {
+                unsafe {
+                    copy_nonoverlapping(data.as_ptr(),
+                        self.get_mut().offset(off + (width - w) as isize) as *mut Rgba,
+                        w as usize);
+                }
+            }
+
+            clr = interpolate_color(i, from, to, height as i32);
+        }
+    }
+
     pub fn fill_rect(&mut self, top_left: Point, width: i32, height: i32, rgb: Rgba) {
         use core::ptr::copy_nonoverlapping;
         use core::cmp::min;
@@ -197,17 +251,25 @@ impl Framebuffer {
 
         let base = top_left.y as isize * self.width as isize;
         // our kernel stack is big enough for this whole block of data
-        let data = &[rgb; 128 as usize];
+        let data = &[rgb; 256];
         {
             let mut off = base + top_left.x as isize;
             let mut w = width;
-            while w > 0 {
+            while w >= 256 {
+                unsafe {
+                    copy_nonoverlapping(data,
+                        self.get_mut().offset(off + (width - w) as isize) as *mut _,
+                        1);
+                }
+                w -= 256;
+            }
+
+            if w > 0 {
                 unsafe {
                     copy_nonoverlapping(data.as_ptr(),
                         self.get_mut().offset(off + (width - w) as isize) as *mut Rgba,
                         w as usize);
                 }
-                w -= 128;
             }
         }
 

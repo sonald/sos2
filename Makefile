@@ -32,6 +32,9 @@ build/%.o: %.asm
 kern: 
 	xargo build --target=$(target) --features "test kdebug"
 
+check:
+	xargo check --target=$(target) --features "test kdebug"
+
 
 sos2.iso: $(kernel) 
 	@mkdir -p isofiles/boot/grub

@@ -48,18 +48,17 @@ fn display(fb: &mut Framebuffer) {
 
     unsafe {
         vga = fb.get_mut() as *mut _;
-        let mut clr: u32 = 0;
 
-        let w = fb.width;
+        //let w = fb.width as i32;
+        //let h = fb.height as i32;
         for g in 0..1 {
-            for i in 0..fb.height {
-                fb.draw_line(Point{x:0, y:i as i32}, Point{x:w as i32-1, y: i as i32}, Rgba(clr));
-                //let data = &[clr; 800];
-                //let off = i * fb.width;
-                //copy_nonoverlapping(data, vga.offset(off as isize) as *mut _, 1);
-                let r: u32 = (256 * i / fb.height) as u32;
-                clr  = (g << 8) | (r <<16);
-            }
+            //let mut clr: u32 = 0;
+            //for i in 0..fb.height {
+                //fb.draw_line(Point{x:0, y:i as i32}, Point{x:w as i32-1, y: i as i32}, Rgba(clr));
+                //let r: u32 = (256 * i / fb.height) as u32;
+                //clr  = (g << 8) | (r <<16);
+            //}
+            fb.fill_rect_grad(Point{x:0, y: 0}, w, h, Rgba(0x0000ff00), Rgba(255<<16));
 
             //busy_wait();
             fb.draw_line(Point{x: 530, y: 120}, Point{x: 330, y: 10}, Rgba(0xeeeeeeee));
@@ -87,7 +86,7 @@ fn display(fb: &mut Framebuffer) {
             fb.fill_rect(Point{x:200, y: 420}, 390, 100, Rgba::from(0xe0, g as u8, 0x80));
 
             fb.draw_char(Point{x:300, y: 550}, b'A', Rgba(0x000000ff), Rgba(0x00ff0000));
-            fb.draw_str(Point{x:40, y: 550}, b"Loading SOS...", Rgba(0x000000ff), Rgba(clr));
+            fb.draw_str(Point{x:40, y: 550}, b"Loading SOS...", Rgba(0x000000ff), Rgba(0x00ff0000));
 
             x86_64::instructions::interrupts::disable();
             printk!(Debug, "loop {}\n\r", g);
