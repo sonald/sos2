@@ -32,7 +32,7 @@ use kern::driver::serial;
 use kern::memory;
 use kern::interrupts;
 use kheap_allocator as kheap;
-use kern::driver::video::framebuffer::{Framebuffer, Point, Rgba};
+use kern::driver::video::{Framebuffer, Point, Rgba};
 
 #[allow(dead_code)]
 fn busy_wait () {
@@ -43,24 +43,12 @@ fn busy_wait () {
 
 /// test rgb framebuffer drawing
 fn display(fb: &mut Framebuffer) {
-    use core::ptr::*;
-    let vga;
-
     unsafe {
-        vga = fb.get_mut() as *mut _;
-
-        //let w = fb.width as i32;
-        //let h = fb.height as i32;
+        let w = fb.width as i32;
+        let h = fb.height as i32;
         for g in 0..1 {
-            //let mut clr: u32 = 0;
-            //for i in 0..fb.height {
-                //fb.draw_line(Point{x:0, y:i as i32}, Point{x:w as i32-1, y: i as i32}, Rgba(clr));
-                //let r: u32 = (256 * i / fb.height) as u32;
-                //clr  = (g << 8) | (r <<16);
-            //}
             fb.fill_rect_grad(Point{x:0, y: 0}, w, h, Rgba(0x0000ff00), Rgba(255<<16));
 
-            //busy_wait();
             fb.draw_line(Point{x: 530, y: 120}, Point{x: 330, y: 10}, Rgba(0xeeeeeeee));
             fb.draw_line(Point{x: 330, y: 120}, Point{x: 530, y: 10}, Rgba(0xeeeeeeee));
             
@@ -87,6 +75,8 @@ fn display(fb: &mut Framebuffer) {
 
             fb.draw_char(Point{x:300, y: 550}, b'A', Rgba(0x000000ff), Rgba(0x00ff0000));
             fb.draw_str(Point{x:40, y: 550}, b"Loading SOS...", Rgba(0x000000ff), Rgba(0x00ff0000));
+            fb.blit_copy(Point{x: 200, y: 100}, Point{x: 40, y: 550},  200, 20);
+            fb.blit_copy(Point{x: 150, y: 150}, Point{x: 50, y: 50}, 350, 350);
 
             x86_64::instructions::interrupts::disable();
             printk!(Debug, "loop {}\n\r", g);

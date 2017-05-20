@@ -1,4 +1,6 @@
-use core::ptr::{Unique, write_volatile};
+use core::ptr::{Unique, copy_nonoverlapping, copy, write_volatile};
+use core::cmp::min;
+
 use core::slice::from_raw_parts_mut;
 use core::slice::SliceExt;
 use multiboot2;
@@ -44,9 +46,9 @@ pub struct Point {
 
 pub struct Framebuffer {
     buf: Unique<Rgba>,
-    pub width: usize,
-    pub height: usize,
-    pub pitch: usize
+    pub width: i32,
+    pub height: i32,
+    pub pitch: i32
 }
 
 impl Framebuffer {
@@ -59,9 +61,9 @@ impl Framebuffer {
         unsafe {
             Framebuffer {
                 buf: Unique::new(base as *mut Rgba),
-                width: fb.width as usize,
-                height: fb.height as usize,
-                pitch: fb.pitch as usize
+                width: fb.width as i32,
+                height: fb.height as i32,
+                pitch: fb.pitch as i32
             }
         }
     }
@@ -70,6 +72,8 @@ impl Framebuffer {
         self.buf.get_mut() as *mut _
     }
 
+    //TODO: optimize situation when dy == 0
+    //TODO: add anti-aliasing based on xiaolin wu's algorithm
     // based on wikipedia bresenham line algorithm
     pub fn draw_line(&mut self, p1: Point, p2: Point, rgb: Rgba) {
         let dx = (p2.x - p1.x).abs();
@@ -178,8 +182,8 @@ impl Framebuffer {
 
     pub fn draw_rect(&mut self, top_left: Point, width: i32, height: i32, rgb: Rgba) {
         use core::cmp::min;
-        let width = min(self.width as i32 - top_left.x, width);
-        let height = min(self.height as i32 - top_left.y, height);
+        let width = min(self.width - top_left.x, width);
+        let height = min(self.height - top_left.y, height);
 
         let (l, r, t, b) = (top_left.x, top_left.x + width - 1, top_left.y, top_left.y + height - 1);
         self.draw_line(Point{x: l, y: t}, Point{x: r, y: t}, rgb);
@@ -211,24 +215,24 @@ impl Framebuffer {
         use core::ptr::copy_nonoverlapping;
         use core::cmp::min;
 
-        let width = min(self.width as i32 - top_left.x, width);
-        let height = min(self.height as i32 - top_left.y, height);
+        let width = min(self.width - top_left.x, width);
+        let height = min(self.height - top_left.y, height);
 
         let mut clr = from;
 
-        let base = top_left.y as isize * self.width as isize;
+        let base = (top_left.y * self.width) as isize;
         // our kernel stack is big enough for this whole block of data
         for i in 0..height {
-            let data = &[clr; 256];
-            let mut off = base + i as isize * self.width as isize + top_left.x as isize;
+            let data = &[clr; 64];
+            let mut off = base + (i * self.width) as isize + top_left.x as isize;
             let mut w = width;
-            while w >= 256 {
+            while w >= 64 {
                 unsafe {
                     copy_nonoverlapping(data,
                         self.get_mut().offset(off + (width - w) as isize) as *mut _,
                         1);
                 }
-                w -= 256;
+                w -= 64;
             }
             if w > 0 {
                 unsafe {
@@ -238,18 +242,40 @@ impl Framebuffer {
                 }
             }
 
-            clr = interpolate_color(i, from, to, height as i32);
+            clr = interpolate_color(i, from, to, height);
+        }
+    }
+
+    // should do sanity check
+    pub fn blit_copy(&mut self, dst: Point, src: Point, width: i32, height: i32) {
+        let width = min(self.width - src.x, width);
+        let height = min(self.height - src.y, height);
+
+        assert!((src.y + height - 1) < self.height);
+        assert!((dst.y + height - 1) < self.height);
+
+        let (dir, mut base, mut dst_base) = match src.y > dst.y {
+            true => (1, src.y * self.width + src.x, dst.y * self.width + dst.x),
+            false => (-1, (src.y + height - 1) * self.width + src.x,
+                (dst.y + height - 1) * self.width + dst.x),
+        };
+
+        for i in 0..height {
+            unsafe {
+                copy_nonoverlapping(self.get_mut().offset(base  as isize),
+                    self.get_mut().offset(dst_base as isize),
+                    width as usize);
+                base += self.width * dir;
+                dst_base += self.width * dir;
+            }
         }
     }
 
     pub fn fill_rect(&mut self, top_left: Point, width: i32, height: i32, rgb: Rgba) {
-        use core::ptr::copy_nonoverlapping;
-        use core::cmp::min;
+        let width = min(self.width - top_left.x, width);
+        let height = min(self.height - top_left.y, height);
 
-        let width = min(self.width as i32 - top_left.x, width);
-        let height = min(self.height as i32 - top_left.y, height);
-
-        let base = top_left.y as isize * self.width as isize;
+        let base = (top_left.y * self.width) as isize;
         // our kernel stack is big enough for this whole block of data
         let data = &[rgb; 256];
         {
@@ -274,7 +300,7 @@ impl Framebuffer {
         }
 
         for i in 1..height {
-            let mut off = base + (i-1) as isize * self.width as isize + top_left.x as isize;
+            let mut off = base + ((i-1) * self.width) as isize + top_left.x as isize;
             unsafe {
                 copy_nonoverlapping(
                     self.get_mut().offset(off) as *mut Rgba,
@@ -285,14 +311,15 @@ impl Framebuffer {
     }
 
     pub fn draw_char(&mut self, p: Point, c: u8, rgb: Rgba, bg: Rgba) {
-        let base = (p.y * self.width as i32 + p.x) as isize;
+        let base = (p.y * self.width + p.x) as isize;
 
         let glyph = BUILTIN_FONT[c as usize - 1];
         for i in 0..16 {
             let off = base + (i * self.width) as isize;
             for j in 0..8 {
                 unsafe {
-                    *self.get_mut().offset(off+j as isize) = match glyph[i*8+j] {
+                    let idx = (i*8+j) as usize;
+                    *self.get_mut().offset(off+j as isize) = match glyph[idx] {
                         b'*' => rgb,
                         _ => bg,
                     };
@@ -307,7 +334,7 @@ impl Framebuffer {
         for &c in text {
             self.draw_char(p1, c, rgb, bg);
             p1.x += info.xadvance as i32;
-            if p1.x as usize >= self.width {
+            if p1.x >= self.width {
                 p1.x = 0;
                 p1.y += info.yadvance as i32;
             }

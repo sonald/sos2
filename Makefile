@@ -1,8 +1,10 @@
 OS := $(shell uname -s)
 ifeq ($(OS), Darwin)
+	GRUB_MKRESCUE = ${HOME}/crossgcc/bin/grub-mkrescue
 	LD = ${HOME}/crossgcc/bin/x86_64-elf-ld
 else
 	LD = ld
+	GRUB_MKRESCUE = grub-mkrescue
 endif
 arch ?= x86_64
 target := $(arch)-sos2
@@ -18,8 +20,8 @@ all: $(kernel) sos2.iso
 # print makefile variable (for debug purpose)
 print-%: ; @echo $* = $($*)
 
-run:
-	$(QEMU) -cdrom sos2.iso -serial stdio -usb
+run: $(kernel) sos2.iso
+	$(QEMU) -cdrom sos2.iso -serial stdio -usb -vga vmware
 
 $(kernel): kern $(ldscript) $(kern_objs) $(rust_core)
 	@mkdir -p $(@D)
@@ -40,4 +42,4 @@ sos2.iso: $(kernel)
 	@mkdir -p isofiles/boot/grub
 	@cp grub.cfg isofiles/boot/grub
 	@cp $(kernel) isofiles/
-	@grub-mkrescue -o $@ isofiles
+	@$(GRUB_MKRESCUE) -o $@ isofiles
