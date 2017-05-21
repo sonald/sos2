@@ -33,6 +33,7 @@ use kern::memory;
 use kern::interrupts;
 use kheap_allocator as kheap;
 use kern::driver::video::{Framebuffer, Point, Rgba};
+use kern::driver::video::terminal::FramebufferTerminal;
 
 #[allow(dead_code)]
 fn busy_wait () {
@@ -140,9 +141,18 @@ pub extern fn kernel_main(mb2_header: usize) {
         interrupts::test_idt();
     }
 
-    let mut fb = Framebuffer::new(&fb);
-    if cfg!(feature = "test") {
-        display(&mut fb);
+    if fb.frame_type == multiboot2::FramebufferType::Rgb {
+        let mut fb = Framebuffer::new(&fb);
+        if cfg!(feature = "test") {
+            display(&mut fb);
+        }
+
+        let mut fbterm = FramebufferTerminal::new(fb); 
+        use core::fmt::Write;
+        use ::kern::console::TerminalDevice;
+
+        //fbterm.clear();
+        fbterm.write_fmt(format_args!("hello from framebuffer\n\r1\n2\nfaofwn\n"));
     }
     loop {
         kern::util::cpu_relax();

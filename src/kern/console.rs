@@ -2,6 +2,7 @@ use core::ptr;
 use core::mem::size_of_val;
 use core::ptr::{Unique, write_volatile};
 use core::fmt::{Write, Result};
+use core::intrinsics::transmute;
 use spin::Mutex;
 
 use ::kern::arch::port::{Port};
@@ -40,13 +41,29 @@ impl Attribute {
     pub const fn new(fg: Color, bg: Color) -> Attribute {
         Attribute(((bg as u8) << 4) | (fg as u8))
     }
+
+    pub fn bg(&self) -> Color {
+        unsafe { transmute(self.0 >> 4) }
+    }
+
+    pub fn fg(&self) -> Color {
+        unsafe { transmute(self.0 & 0xf) }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct Char {
-    ascii: u8,
-    attr: Attribute
+    pub ascii: u8,
+    pub attr: Attribute
+}
+
+pub trait TerminalDevice: Write {
+    fn set_attr(&mut self, val: Attribute) -> Attribute;
+    fn get_attr(&self) -> Attribute;
+    fn clear(&mut self);
+    fn scroll_up(&mut self);
+    fn putchar(&mut self, byte: u8);
 }
 
 const CONSOLE_WIDTH: usize = 80;
@@ -72,6 +89,59 @@ fn extract_cursor(cursor: usize) -> (usize, usize) {
 /// combine (row, col) pair into offset-based cursor 
 fn contract_cursor(row: usize, col: usize) -> usize {
     row * CONSOLE_WIDTH + col
+}
+
+impl TerminalDevice for Console {
+    fn set_attr(&mut self, val: Attribute) -> Attribute {
+        let old = self.attr;
+        self.attr = val;
+        old
+    }
+
+    fn get_attr(&self) -> Attribute {
+        self.attr
+    }
+
+    fn scroll_up(&mut self) {
+        let (cy, _) = extract_cursor(self.cursor);
+        let blank_line = [Char {
+            ascii: b' ',
+            attr: Attribute::new(Color::White, Color::Black)
+        }; CONSOLE_WIDTH];
+        let off = CONSOLE_WIDTH * (CONSOLE_HEIGHT - 1);
+
+
+        if cy < CONSOLE_HEIGHT - 1 {
+            return;
+        }
+
+        unsafe {
+            let data = (&mut self.buf.get_mut().data).as_mut_ptr();
+            ptr::copy(data.offset(CONSOLE_WIDTH as isize), data, off);
+            ptr::copy_nonoverlapping(&blank_line, data.offset(off as isize) as *mut _, 1);
+        }
+    }
+
+    fn clear(&mut self) {
+        let blank_line = [Char {
+            ascii: b' ',
+            attr: Attribute::new(Color::White, Color::Black)
+        }; CONSOLE_WIDTH];
+
+        unsafe {
+            let data = (&mut self.buf.get_mut().data).as_mut_ptr();
+            for off in 0..CONSOLE_HEIGHT {
+                ptr::copy_nonoverlapping((&blank_line).as_ptr(),
+                    data.offset((off * CONSOLE_WIDTH) as isize), size_of_val(&blank_line));
+            }
+        }
+
+        self.update_cursor(0, 0);
+    }
+
+    fn putchar(&mut self, byte: u8) {
+        self.write_byte(byte)
+    }
 }
 
 impl Console {
@@ -100,16 +170,6 @@ impl Console {
         self.set_phy_cursor(v);
     }
 
-    pub fn set_attr(&mut self, val: Attribute) -> Attribute {
-        let old = self.attr;
-        self.attr = val;
-        old
-    }
-
-    pub fn get_attr(&self) -> Attribute {
-        self.attr
-    }
-
     /// safely call f without potential deadlock of console
     pub fn with<F>(con: &Mutex<Console>, row: usize, col: usize, f: F) where F: FnOnce() {
         let old = con.lock().cursor;
@@ -117,23 +177,6 @@ impl Console {
         f();
         let (cy, cx) = extract_cursor(old);
         con.lock().update_cursor(cy, cx);
-    }
-
-    pub fn clear(&mut self) {
-        let blank_line = [Char {
-            ascii: b' ',
-            attr: Attribute::new(Color::White, Color::Black)
-        }; CONSOLE_WIDTH];
-
-        unsafe {
-            let data = (&mut self.buf.get_mut().data).as_mut_ptr();
-            for off in 0..CONSOLE_HEIGHT {
-                ptr::copy_nonoverlapping((&blank_line).as_ptr(),
-                    data.offset((off * CONSOLE_WIDTH) as isize), size_of_val(&blank_line));
-            }
-        }
-
-        self.update_cursor(0, 0);
     }
 
 
@@ -175,26 +218,6 @@ impl Console {
 
         self.update_cursor(cy, cx);
         old
-    }
-
-    fn scroll_up(&mut self) {
-        let (cy, _) = extract_cursor(self.cursor);
-        let blank_line = [Char {
-            ascii: b' ',
-            attr: Attribute::new(Color::White, Color::Black)
-        }; CONSOLE_WIDTH];
-        let off = CONSOLE_WIDTH * (CONSOLE_HEIGHT - 1);
-
-
-        if cy < CONSOLE_HEIGHT - 1 {
-            return;
-        }
-
-        unsafe {
-            let data = (&mut self.buf.get_mut().data).as_mut_ptr();
-            ptr::copy(data.offset(CONSOLE_WIDTH as isize), data, off);
-            ptr::copy_nonoverlapping(&blank_line, data.offset(off as isize) as *mut _, 1);
-        }
     }
 
     pub fn write_byte(&mut self, byte: u8) {
@@ -256,12 +279,11 @@ impl Console {
     }
 }
 
-
 use kern::driver::serial;
 impl Write for Console {
     fn write_str(&mut self, s: &str) -> Result {
         for b in s.bytes() {
-            self.write_byte(b);
+            self.putchar(b);
         }
 
         unsafe {
