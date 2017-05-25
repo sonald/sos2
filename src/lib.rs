@@ -27,13 +27,13 @@ extern crate bit_field;
 #[macro_use] mod kern;
 
 use kern::console as con;
+use con::Console;
 use con::LogLevel::*;
 use kern::driver::serial;
 use kern::memory;
 use kern::interrupts;
 use kheap_allocator as kheap;
 use kern::driver::video::{Framebuffer, Point, Rgba};
-use kern::driver::video::terminal::FramebufferTerminal;
 
 #[allow(dead_code)]
 fn busy_wait () {
@@ -147,12 +147,13 @@ pub extern fn kernel_main(mb2_header: usize) {
             display(&mut fb);
         }
 
-        let mut fbterm = FramebufferTerminal::new(fb); 
-        use core::fmt::Write;
-        use ::kern::console::TerminalDevice;
+        {
+            let mut term = con::tty1.lock();
+            *term = Console::new_with_fb(fb);
+        }
 
-        //fbterm.clear();
-        fbterm.write_fmt(format_args!("hello from framebuffer\n\r1\n2\nfaofwn\n"));
+        con::clear();
+        println!("hello from framebuffer\n\rload sos2....\n\r");
     }
     loop {
         kern::util::cpu_relax();

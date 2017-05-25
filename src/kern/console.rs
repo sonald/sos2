@@ -3,9 +3,11 @@ use core::mem::size_of_val;
 use core::ptr::{Unique, write_volatile};
 use core::fmt::{Write, Result};
 use core::intrinsics::transmute;
-use spin::Mutex;
+use spin::{Mutex, Once};
 
 use ::kern::arch::port::{Port};
+use ::kern::driver::video::terminal::FramebufferDriver;
+use ::kern::driver::video::framebuffer::Framebuffer;
 
 const CRTC_ADDR_REG: u16 = 0x3D4;
 const CRTC_ADDR_DATA: u16 = 0x3D5;
@@ -58,13 +60,17 @@ pub struct Char {
     pub attr: Attribute
 }
 
-pub trait TerminalDevice: Write {
-    fn set_attr(&mut self, val: Attribute) -> Attribute;
-    fn get_attr(&self) -> Attribute;
+pub trait TerminalDriver {
+    fn update_cursor(&mut self, row: usize, col: usize);
+    fn draw_byte(&mut self, cursor: usize, byte: Char);
+    fn get_max_cols(&self) -> usize; 
+    fn get_max_rows(&self) -> usize;
+    fn resizable(&self) -> bool;
+    fn set_size(&mut self, rows: usize, cols: usize);
+    fn scroll_up(&mut self, cursor: usize);
     fn clear(&mut self);
-    fn scroll_up(&mut self);
-    fn putchar(&mut self, byte: u8);
 }
+
 
 const CONSOLE_WIDTH: usize = 80;
 const CONSOLE_HEIGHT: usize = 25;
@@ -73,37 +79,16 @@ struct Buffer {
     data: [Char; CONSOLE_WIDTH * CONSOLE_HEIGHT]
 }
 
-pub struct Console {
+// text only terminal
+pub struct ConsoleDriver {
     buf: Unique<Buffer>,
-    cursor: usize,  // cursor as offset
-    attr: Attribute, // current char attribute
     crtc_reg: Port<u8>,
-    crtc_data: Port<u8>
+    crtc_data: Port<u8>,
 }
 
-/// extract offset-based cursor into (row, col) pair
-fn extract_cursor(cursor: usize) -> (usize, usize) {
-    (cursor / CONSOLE_WIDTH, cursor % CONSOLE_WIDTH)
-}
-
-/// combine (row, col) pair into offset-based cursor 
-fn contract_cursor(row: usize, col: usize) -> usize {
-    row * CONSOLE_WIDTH + col
-}
-
-impl TerminalDevice for Console {
-    fn set_attr(&mut self, val: Attribute) -> Attribute {
-        let old = self.attr;
-        self.attr = val;
-        old
-    }
-
-    fn get_attr(&self) -> Attribute {
-        self.attr
-    }
-
-    fn scroll_up(&mut self) {
-        let (cy, _) = extract_cursor(self.cursor);
+impl TerminalDriver for ConsoleDriver {
+    fn scroll_up(&mut self, cursor: usize) {
+        let (cy, _) = (cursor / CONSOLE_WIDTH, cursor % CONSOLE_WIDTH);
         let blank_line = [Char {
             ascii: b' ',
             attr: Attribute::new(Color::White, Color::Black)
@@ -135,22 +120,41 @@ impl TerminalDevice for Console {
                     data.offset((off * CONSOLE_WIDTH) as isize), size_of_val(&blank_line));
             }
         }
-
-        self.update_cursor(0, 0);
     }
 
-    fn putchar(&mut self, byte: u8) {
-        self.write_byte(byte)
+    fn update_cursor(&mut self, row: usize, col: usize) {
+        let v = row * CONSOLE_WIDTH + col;
+        self.set_phy_cursor(v);
+    }
+
+    fn get_max_cols(&self) -> usize {
+        CONSOLE_WIDTH
+    }
+
+    fn get_max_rows(&self) -> usize {
+        CONSOLE_HEIGHT
+    }
+
+    fn set_size(&mut self, rows: usize, cols: usize) {
+    }
+
+    fn resizable(&self) -> bool {
+        return false;
+    }
+
+    fn draw_byte(&mut self, cursor: usize, byte: Char) {
+        unsafe {
+            let p = &mut self.buf.get_mut().data[cursor];
+            write_volatile(p, byte);
+        }
     }
 }
 
-impl Console {
-    const fn new() -> Console {
+impl ConsoleDriver {
+    const fn new() -> ConsoleDriver {
         use ::kern::memory::KERNEL_MAPPING;
-        Console {
+        ConsoleDriver {
             buf: unsafe { Unique::new((KERNEL_MAPPING.KernelMap.start + 0xb8000) as *mut _) },
-            cursor: 0,
-            attr: Attribute::new(Color::White, Color::Black),
             crtc_reg: Port::new(CRTC_ADDR_REG),
             crtc_data: Port::new(CRTC_ADDR_DATA)
         }
@@ -163,54 +167,90 @@ impl Console {
         self.crtc_reg.write(CURSOR_LOCATION_LOW_IND);
         self.crtc_data.write(linear as u8);
     }
+    
+}
 
-    fn update_cursor(&mut self, row: usize, col: usize) {
-        let v = contract_cursor(row, col);
+
+
+pub struct TerminalHelper<T> {
+    pub cursor: usize,  // cursor as offset
+    pub attr: Attribute, // current char attribute
+    pub cols: usize,
+    pub rows: usize,
+    pub drv: T
+}
+
+impl<T: TerminalDriver> TerminalHelper<T> {
+    pub const fn new(drv: T) -> TerminalHelper<T> {
+        TerminalHelper {
+            drv: drv,
+            cursor: 0,
+            attr: Attribute::new(Color::Green, Color::Black),
+            cols: CONSOLE_WIDTH,
+            rows: CONSOLE_HEIGHT
+        }
+    }
+
+    pub fn update_cursor(&mut self, row: usize, col: usize) {
+        let v = self.contract_cursor(row, col);
         self.cursor = v;
-        self.set_phy_cursor(v);
+        self.drv.update_cursor(row, col);
     }
 
-    /// safely call f without potential deadlock of console
-    pub fn with<F>(con: &Mutex<Console>, row: usize, col: usize, f: F) where F: FnOnce() {
-        let old = con.lock().cursor;
-        con.lock().update_cursor(row, col);
-        f();
-        let (cy, cx) = extract_cursor(old);
-        con.lock().update_cursor(cy, cx);
-    }
-
-
-    /// move cursor forward by one and do correct scrolling up
-    /// return old cursor
-    fn advance(&mut self) -> usize {
+    pub fn advance(&mut self) -> usize {
         let old = self.cursor;
-        let (mut cy, mut cx) = extract_cursor(old);
+        let (mut cy, mut cx) = self.extract_cursor(old);
 
         cx += 1;
-        if cx == CONSOLE_WIDTH {
+        if cx == self.cols {
             cx = 0;
             cy += 1;
         }
 
-        if cy == CONSOLE_HEIGHT {
-            cy = CONSOLE_HEIGHT - 1;
-            self.scroll_up();
+        if cy == self.rows {
+            cy = self.rows - 1;
+            self.drv.scroll_up(self.cursor);
         }
 
         self.update_cursor(cy, cx);
         old
     }
 
+    /// extract offset-based cursor into (row, col) pair
+    pub fn extract_cursor(&self, cursor: usize) -> (usize, usize) {
+        (cursor / self.cols, cursor % self.cols)
+    }
+
+    /// combine (row, col) pair into offset-based cursor 
+    pub fn contract_cursor(&self, row: usize, col: usize) -> usize {
+        row * self.cols + col
+    }
+
+    fn set_attr(&mut self, val: Attribute) -> Attribute {
+        let old = self.attr;
+        self.attr = val;
+        old
+    }
+
+    fn get_attr(&self) -> Attribute {
+        self.attr
+    }
+
+    fn clear(&mut self) {
+        self.drv.clear();
+        self.update_cursor(0, 0);
+    }
+
     fn retreat(&mut self) -> usize {
         let old = self.cursor;
-        let (mut cy, mut cx) = extract_cursor(old);
+        let (mut cy, mut cx) = self.extract_cursor(old);
 
         if old == 0 {
             return old;
         }
 
         if cx == 0 {
-            cx = CONSOLE_WIDTH - 1;
+            cx = self.cols - 1;
             cy -= 1;
         } else {
             cx -= 1;
@@ -220,8 +260,9 @@ impl Console {
         old
     }
 
-    pub fn write_byte(&mut self, byte: u8) {
-        let (mut cy, mut cx) = extract_cursor(self.cursor);
+
+    fn write_byte(&mut self, byte: u8) {
+        let (mut cy, mut cx) = self.extract_cursor(self.cursor);
         let blank = Char {
             ascii: b' ',
             attr: Attribute::new(Color::White, Color::Black)
@@ -230,34 +271,29 @@ impl Console {
         match byte {
             0x08 => { // backspace
                 if cx > 0 {
-                    unsafe {
-                        let p = &mut self.buf.get_mut().data[self.cursor];
-                        write_volatile(p, blank);
-                    }
+                    let cur = self.cursor;
+                    self.drv.draw_byte(cur, blank);
                     self.retreat();
                 }
             }, 
             b'\t' => {
                 cx = (cx + 8) & !0x7;
-                if cx >= CONSOLE_WIDTH {
-                    cx = CONSOLE_WIDTH - 1;
+                if cx >= self.cols {
+                    cx = self.cols - 1;
                 }
 
                 let old = self.cursor;
                 self.update_cursor(cy, cx);
-                unsafe {
-                    let data = (&mut self.buf.get_mut().data).as_mut_ptr();
-                    for i in old..self.cursor {
-                        write_volatile(data.offset(i as isize), blank);
-                    }
+                for i in old..self.cursor {
+                    self.drv.draw_byte(i, blank);
                 }
             },
             b'\n' => {
                 cy += 1;
                 cx = 0;
-                if cy == CONSOLE_HEIGHT {
-                    cy = CONSOLE_HEIGHT - 1;
-                    self.scroll_up();
+                if cy == self.rows {
+                    cy = self.rows - 1;
+                    self.drv.scroll_up(self.cursor);
                 }
                 self.update_cursor(cy, cx);
             },
@@ -266,17 +302,83 @@ impl Console {
                 self.update_cursor(cy, cx);
             }, 
             _ => {
-                if self.cursor >= CONSOLE_WIDTH * CONSOLE_HEIGHT {
+                if self.cursor >= self.cols * self.rows {
                     return;
                 }
-                unsafe {
-                    let p = &mut self.buf.get_mut().data[self.cursor];
-                    write_volatile(p, Char {ascii: byte, attr: self.attr});
-                }
+                let (cur, attr) = (self.cursor, self.attr);
+                self.drv.draw_byte(cur, Char {ascii: byte, attr: attr});
                 self.advance();
             }
         }
     }
+}
+
+pub enum Console {
+    TextTerminal(TerminalHelper<ConsoleDriver>),
+    FbTerminal(TerminalHelper<FramebufferDriver>)
+}
+
+impl Console {
+    pub const fn new_with_text_only() -> Console {
+        Console::TextTerminal(TerminalHelper::new(ConsoleDriver::new()))
+    }
+
+    pub fn new_with_fb(fb: Framebuffer) -> Console {
+        Console::FbTerminal(TerminalHelper::new(FramebufferDriver::new(fb)))
+    }
+
+    pub fn putchar(&mut self, byte: u8) {
+        match *self {
+            Console::TextTerminal(ref mut drv) => drv.write_byte(byte),
+            Console::FbTerminal(ref mut drv) => drv.write_byte(byte),
+        }
+    }
+
+    pub fn set_attr(&mut self, val: Attribute) -> Attribute {
+        match *self {
+            Console::TextTerminal(ref mut drv) => drv.set_attr(val),
+            Console::FbTerminal(ref mut drv) => drv.set_attr(val)
+        }
+    }
+
+    pub fn clear(&mut self) {
+        match *self {
+            Console::TextTerminal(ref mut drv) => drv.clear(),
+            Console::FbTerminal(ref mut drv) => drv.clear()
+        }
+    }
+
+    pub fn update_cursor(&mut self, row: usize, col: usize) {
+        match *self {
+            Console::TextTerminal(ref mut drv) => drv.update_cursor(row, col),
+            Console::FbTerminal(ref mut drv) => drv.update_cursor(row, col)
+        }
+    }
+
+    pub fn get_cursor(&self) -> usize {
+        match *self {
+            Console::TextTerminal(ref drv) => drv.cursor,
+            Console::FbTerminal(ref drv) => drv.cursor
+        }
+    }
+
+    pub fn extract_cursor(&self, cursor: usize) -> (usize, usize) {
+        match *self {
+            Console::TextTerminal(ref drv) => drv.extract_cursor(cursor),
+            Console::FbTerminal(ref drv) => drv.extract_cursor(cursor)
+        }
+    }
+
+    /// safely call f without potential deadlock of console
+    pub fn with<F>(con: &Mutex<Console>, row: usize, col: usize, f: F) where F: FnOnce() {
+        let old = con.lock().get_cursor();
+        con.lock().update_cursor(row, col);
+        f();
+        let (cy, cx) = con.lock().extract_cursor(old);
+        con.lock().update_cursor(cy, cx);
+    }
+
+
 }
 
 use kern::driver::serial;
@@ -296,8 +398,9 @@ impl Write for Console {
     }
 }
 
+
 #[allow(non_upper_case_globals)]
-pub static tty1: Mutex<Console> = Mutex::new(Console::new());
+pub static tty1: Mutex<Console> = Mutex::new(Console::new_with_text_only());
 
 macro_rules! println {
     ($fmt:expr) => (print!(concat!($fmt, "\n")));

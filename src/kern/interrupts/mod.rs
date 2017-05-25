@@ -138,9 +138,7 @@ pub fn test_idt() {
         // which will try to spin-lock the console which might be already locked.
         // we should not call such routines in an interrupt handler.
         unsafe { interrupts::disable(); }
-        Console::with(&tty1, 24, 0, || {
-            printk!(Critical, "count: {}", count);
-        });
+        printk!(Critical, "count: {}", count);
         count += 1;
         unsafe { interrupts::enable(); }
 
