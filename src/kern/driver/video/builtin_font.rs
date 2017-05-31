@@ -3,7 +3,7 @@ pub struct FontInfo {
     pub yadvance: u8
 }
 
-pub const BUILTIN_FONTINFO: FontInfo = FontInfo {xadvance: 9, yadvance: 17};
+pub const BUILTIN_FONTINFO: FontInfo = FontInfo {xadvance: 8, yadvance: 16};
 
 pub const BUILTIN_FONT: [&'static [u8; 128]; 255] = [
 b"........\

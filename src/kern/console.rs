@@ -324,7 +324,11 @@ impl Console {
     }
 
     pub fn new_with_fb(fb: Framebuffer) -> Console {
-        Console::FbTerminal(TerminalHelper::new(FramebufferDriver::new(fb)))
+        let mut helper = TerminalHelper::new(FramebufferDriver::new(fb));
+        helper.cols = helper.drv.get_max_cols();
+        helper.rows = helper.drv.get_max_rows();
+            
+        Console::FbTerminal(helper)
     }
 
     pub fn putchar(&mut self, byte: u8) {
