@@ -309,7 +309,8 @@ impl ActivePML4Table {
     }
 }
 
-pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A: FrameAllocator {
+pub fn create_address_space<A>(allocator: &mut A, mbinfo: &BootInformation)
+    -> InactivePML4Table where A: FrameAllocator {
 
     let kernel_base = KERNEL_MAPPING.KernelMap.start;
     let mut active = ActivePML4Table::new();
@@ -418,6 +419,12 @@ pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A:
 
     });
 
+    printk!(Info, "create_address_space {:?}\n\r", new_map);
+    new_map
+}
+
+pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A: FrameAllocator {
+    let mut new_map = create_address_space(allocator, mbinfo);
     let old_map = switch(new_map);
     printk!(Info, "switching kernel map from {:?} to {:?}\n\r", old_map, new_map);
 }

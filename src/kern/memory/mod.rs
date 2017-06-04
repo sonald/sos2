@@ -10,6 +10,7 @@ use self::frame::*;
 use self::paging::*;
 use core::ops::Range;
 use self::stack_allocator::StackAllocator;
+use self::inactive::InactivePML4Table;
 
 use spin;
 use kheap_allocator;
@@ -43,20 +44,22 @@ pub const KERNEL_MAPPING: MemorySchema = MemorySchema {
 };
 
 #[allow(non_snake_case)]
-pub struct MemoryManager {
+pub struct MemoryManager<'a> {
     pub activePML4Table: ActivePML4Table,
+    pub kernelPML4Table: InactivePML4Table,
     pub areaFrameAllocator: AreaFrameAllocator,
     pub stackAllocator: StackAllocator,
+    pub mbinfo: &'a BootInformation
 }
 
-impl MemoryManager {
+impl<'a> MemoryManager<'a> {
     pub fn alloc_stack(&mut self, size_in_pages: usize) -> Option<Stack> {
         self.stackAllocator.alloc_stack(&mut self.activePML4Table, &mut self.areaFrameAllocator, size_in_pages)
     }
 
 }
 
-pub fn init(mbinfo: &BootInformation) -> MemoryManager {
+pub fn init<'a>(mbinfo: &'a BootInformation) -> MemoryManager<'a> {
     #[inline]
     fn align_up(start: usize, align: usize) -> usize {
         ((start + align - 1) / align) * align
@@ -132,15 +135,19 @@ pub fn init(mbinfo: &BootInformation) -> MemoryManager {
     //after heap
     let stack_allocator = {
         let start = Page::from_vaddress(align_up(mbinfo.end_address(), PAGE_SIZE) + 0x1000 * 1024);
-        let end = start + 100;
+        let end = start + 1024;
 
         StackAllocator::new(start, end)
     };
 
     MemoryManager {
         activePML4Table: ActivePML4Table::new(),
+        kernelPML4Table: InactivePML4Table {
+            pml4_frame: Frame::from_paddress(::kern::arch::cpu::cr3())
+        },
         areaFrameAllocator: afa,
-        stackAllocator: stack_allocator
+        stackAllocator: stack_allocator,
+        mbinfo: mbinfo
     }
 }
 

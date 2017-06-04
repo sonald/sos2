@@ -432,6 +432,51 @@ pub enum LogLevel {
     Critical
 }
 
+pub fn _unsafe_print(con: &mut Console, args: ::core::fmt::Arguments) -> ::core::fmt::Result {
+    con.write_fmt(args)
+}
+
+// NOTE: use only in a situation unlocked access is safe, such as timer (with interrupt disabled)
+macro_rules! unlocked_printk {
+    ($lv:expr, $row:tt, $col:tt, $($arg:tt)*) => ({
+        use $crate::kern::console::*;
+
+        let mut con;
+        let maybe_con = tty1.try_lock();
+        let need_unlock = if maybe_con.is_none() {
+            unsafe { tty1.force_unlock(); }
+            con = tty1.lock();
+            false
+        } else {
+            con = maybe_con.unwrap();
+            true
+        };
+
+        let old_cur = con.get_cursor();
+        con.update_cursor($row, $col);
+
+        if $lv != LogLevel::Debug || cfg!(feature = "kdebug") {
+            let attr = match $lv {
+                LogLevel::Debug => Attribute::new(Color::Green, Color::Black),
+                LogLevel::Normal => Attribute::new(Color::White, Color::Black),
+                LogLevel::Info => Attribute::new(Color::Cyan, Color::Black),
+                LogLevel::Warn => Attribute::new(Color::Red, Color::Black),
+                LogLevel::Critical => Attribute::new(Color::LightRed, Color::White),
+            };
+
+            let old_attr = con.set_attr(attr);
+            _unsafe_print(&mut con, format_args!($($arg)*)).unwrap();
+            con.set_attr(old_attr);
+        }
+
+        let (cy, cx) = con.extract_cursor(old_cur);
+        con.update_cursor(cy, cx);
+        if need_unlock {
+            unsafe { tty1.force_unlock(); }
+        }
+    });
+}
+
 macro_rules! printk {
     ($lv:expr, $($arg:tt)*) => ({
         use $crate::kern::console::*;

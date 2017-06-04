@@ -34,6 +34,7 @@ use kern::memory;
 use kern::interrupts;
 use kheap_allocator as kheap;
 use kern::driver::video::{Framebuffer, Point, Rgba};
+use kern::task;
 
 #[allow(dead_code)]
 fn busy_wait () {
@@ -47,9 +48,7 @@ fn display(fb: &mut Framebuffer) {
         let w = fb.width as i32;
         let h = fb.height as i32;
         for g in 0..1 {
-            unsafe {
-                x86_64::instructions::interrupts::disable();
-            }
+            //unsafe { x86_64::instructions::interrupts::disable(); }
             fb.fill_rect_grad(Point{x:0, y: 0}, w, h, Rgba(0x0000ff00), Rgba(255<<16));
 
             fb.draw_line(Point{x: 530, y: 120}, Point{x: 330, y: 10}, Rgba(0xeeeeeeee));
@@ -82,9 +81,7 @@ fn display(fb: &mut Framebuffer) {
             fb.blit_copy(Point{x: 150, y: 150}, Point{x: 50, y: 50}, 350, 350);
 
             printk!(Debug, "loop {}\n\r", g);
-            unsafe {
-                x86_64::instructions::interrupts::enable();
-            }
+            //unsafe { x86_64::instructions::interrupts::enable(); }
         }
 
 
@@ -139,15 +136,11 @@ pub extern fn kernel_main(mb2_header: usize) {
     }
 
     interrupts::init(&mut mm);
-    if cfg!(feature = "test") {
-        interrupts::test_idt();
-    }
+    if cfg!(feature = "test") { interrupts::test_idt(); }
 
     if fb.frame_type == multiboot2::FramebufferType::Rgb {
         let mut fb = Framebuffer::new(&fb);
-        if cfg!(feature = "test") {
-            display(&mut fb);
-        }
+        if cfg!(feature = "test") { display(&mut fb); }
 
         {
             let mut term = con::tty1.lock();
@@ -155,14 +148,14 @@ pub extern fn kernel_main(mb2_header: usize) {
         }
 
         con::clear();
-        println!("hello from framebuffer\n\rload sos2....\n\r");
-        for b in 1..127u8 {
-            print!("{}", b as char);
+        println!("framebuffer console init.\n\r");
+        if cfg!(feature = "test") { 
+            for b in 1..127u8 { print!("{}", b as char); }
         }
     }
-    if cfg!(feature = "test") {
-        interrupts::test_idt();
-    }
+
+    task::init(&mut mm);
+
     loop {
         kern::util::cpu_relax();
     }

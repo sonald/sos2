@@ -6,6 +6,8 @@ use spin::Mutex;
 use ::kern::console::LogLevel::*;
 use ::kern::console::{Console, tty1};
 
+use ::kern::task::*;
+
 const FREQ: u32 = 1193180;
 const HZ: u32 = 100;
 
@@ -40,7 +42,6 @@ impl Timer {
         // Send the frequency divisor.
         self.ports[0].write(l as u8);
         self.ports[0].write(h as u8);
-
     }
 
 }
@@ -52,9 +53,18 @@ pub extern "C" fn timer_handler(frame: &mut ExceptionStackFrame) {
     
     let old = TIMER_TICKS.fetch_add(1, Ordering::SeqCst);
     if (old + 1) % HZ as usize == 0 {
-        Console::with(&tty1, 0, 60, || {
-            printk!(Critical, "{}", TIMER_TICKS.load(Ordering::Acquire));
-        });
+        unlocked_printk!(Critical, 0, 60, "{}", TIMER_TICKS.load(Ordering::Acquire));
+    }
+
+    let id = CURRENT_ID.load(Ordering::Acquire);
+    if id > 0 {
+        
+        unsafe {
+            let nid = if id + 1 > TASKS.nr { 1 } else { id + 1 };
+            CURRENT_ID.store(nid, Ordering::Release);
+            //printk!(Debug, "switch to {:?}\n", TASKS.tasks[nid].ctx);
+            switch_to(&mut TASKS.tasks[id], &mut TASKS.tasks[nid]); 
+        }
     }
 }
 

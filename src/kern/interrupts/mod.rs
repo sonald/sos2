@@ -12,6 +12,7 @@ use ::kern::driver::keyboard::{KBD, keyboard_irq};
 use x86_64::structures::tss::TaskStateSegment;
 use x86_64::instructions::interrupts;
 use x86_64::instructions::segmentation::cs;
+use x86_64::registers::flags;
 
 use ::kern::console::LogLevel::*;
 use ::kern::arch::cpu::cr2;
@@ -115,13 +116,17 @@ pub fn init(mm: &mut MemoryManager) {
         PIC_CHAIN.lock().enable(Irqs::IRQ2 as usize);
         PIC_CHAIN.lock().enable(Irqs::TIMER as usize);
         PIC_CHAIN.lock().enable(Irqs::KBD as usize);
+
+        //disable maskable and re-enabled by first kernel thread
+        let f = flags::Flags::from_bits_truncate(0x2);
+        flags::set_flags(f);
         interrupts::enable();
     }
 }
 
 pub fn test_idt() {
     let busy_wait =|| {
-        for _ in 1..50000 {
+        for _ in 1..10000 {
             ::kern::util::cpu_relax();
         }
     };
@@ -130,17 +135,12 @@ pub fn test_idt() {
     let mut count = 0;
 
     loop {
-        if count > 10 {
+        if count > 100 {
             break;
         }
 
-        // the reason why we cli is that we use printk inside of timer interrupt handler,
-        // which will try to spin-lock the console which might be already locked.
-        // we should not call such routines in an interrupt handler.
-        unsafe { interrupts::disable(); }
-        printk!(Critical, "count: {}", count);
+        printk!(Critical, "count: {}\r", count);
         count += 1;
-        unsafe { interrupts::enable(); }
 
         busy_wait();
     }

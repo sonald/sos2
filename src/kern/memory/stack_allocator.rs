@@ -5,7 +5,7 @@ use super::{MemoryManager, PAGE_SIZE};
 #[macro_use] use kern::console as con;
 use con::LogLevel::*;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Stack {
     top: usize,
     bottom: usize,
