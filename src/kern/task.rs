@@ -2,6 +2,7 @@ use ::kern::memory::inactive::InactivePML4Table;
 use ::kern::memory::stack_allocator::{Stack, StackAllocator};
 use ::kern::memory::MemoryManager;
 use ::kern::console::LogLevel::*;
+use ::kern::console::{Console, tty1};
 use core::sync::atomic::{AtomicUsize, Ordering};
 use x86_64::instructions::interrupts;
 
@@ -51,6 +52,8 @@ impl Context {
 #[derive(Debug, Clone, Copy)]
 pub struct Task {
     pub pid: ProcId,
+    pub ppid: ProcId,
+    pub name: Box<[char]>,
     pub cr3: Option<InactivePML4Table>,
     pub kern_stack: Option<Stack>,
     pub ctx: Context,
@@ -91,10 +94,11 @@ pub static CURRENT_ID: AtomicUsize = AtomicUsize::new(0);
 pub fn init(mm: &mut MemoryManager) {
     printk!(Info, "tasks init\n\r");
     use core::mem::size_of;
+    use ::kern::arch::cpu;
 
-    //FIXME: check cli
-    
     unsafe {
+        let oflags = unsafe { cpu::push_flags() };
+
         let init_stack = mm.alloc_stack(1).expect("alloc init task stack failed\n\r");
         printk!(Info, "alloc init stack {:#x}\n\r", init_stack.bottom());
 
@@ -119,11 +123,14 @@ pub fn init(mm: &mut MemoryManager) {
             *(kern_rsp as *mut usize) = rip;
 
             task.cr3 = None; //share with kernel
-            printk!(Info, "{:?}\n\r", task);
+            //printk!(Info, "{:?}\n\r", task);
         }
 
         TASKS.nr = rips.len();
+
+        cpu::pop_flags(oflags);
     }
+
 
     CURRENT_ID.store(1, Ordering::Release);
     unsafe { start_tasking(&mut TASKS.tasks[1]); }
@@ -146,9 +153,9 @@ pub fn test_thread3() {
     };
 
     loop {
-        unsafe { interrupts::disable(); }
-        unlocked_printk!(Debug, 21, 0, "kernel thread 3: {}\n\r", count);
-        unsafe { interrupts::enable(); }
+        Console::with(&tty1, 22, 0, || {
+            printk!(Debug, "kernel thread 3: {}\n\r", count);
+        });
         count += 1;
         busy_wait();
     }
@@ -163,9 +170,9 @@ pub fn test_thread2() {
     };
 
     loop {
-        unsafe { interrupts::disable(); }
-        unlocked_printk!(Debug, 22, 0, "kernel thread 2: {}\n\r", count);
-        unsafe { interrupts::enable(); }
+        Console::with(&tty1, 21, 0, || {
+            printk!(Debug, "kernel thread 2: {}\n\r", count);
+        });
         count += 1;
         busy_wait();
     }
@@ -180,9 +187,9 @@ pub fn test_thread() {
     };
 
     loop {
-        unsafe { interrupts::disable(); }
-        unlocked_printk!(Debug, 20, 0, "kernel thread 1: {}\n\r", count);
-        unsafe { interrupts::enable(); }
+        Console::with(&tty1, 20, 0, || {
+            printk!(Debug, "kernel thread 1: {}\n\r", count);
+        });
         count += 1;
         busy_wait();
     }

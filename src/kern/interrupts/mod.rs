@@ -116,10 +116,6 @@ pub fn init(mm: &mut MemoryManager) {
         PIC_CHAIN.lock().enable(Irqs::IRQ2 as usize);
         PIC_CHAIN.lock().enable(Irqs::TIMER as usize);
         PIC_CHAIN.lock().enable(Irqs::KBD as usize);
-
-        //disable maskable and re-enabled by first kernel thread
-        let f = flags::Flags::from_bits_truncate(0x2);
-        flags::set_flags(f);
         interrupts::enable();
     }
 }

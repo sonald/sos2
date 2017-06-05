@@ -45,46 +45,42 @@ fn busy_wait () {
 
 /// test rgb framebuffer drawing
 fn display(fb: &mut Framebuffer) {
-        let w = fb.width as i32;
-        let h = fb.height as i32;
-        for g in 0..1 {
-            //unsafe { x86_64::instructions::interrupts::disable(); }
-            fb.fill_rect_grad(Point{x:0, y: 0}, w, h, Rgba(0x0000ff00), Rgba(255<<16));
+    let w = fb.width as i32;
+    let h = fb.height as i32;
+    for g in 0..1 {
+        fb.fill_rect_grad(Point{x:0, y: 0}, w, h, Rgba(0x0000ff00), Rgba(255<<16));
 
-            fb.draw_line(Point{x: 530, y: 120}, Point{x: 330, y: 10}, Rgba(0xeeeeeeee));
-            fb.draw_line(Point{x: 330, y: 120}, Point{x: 530, y: 10}, Rgba(0xeeeeeeee));
-            
-            fb.draw_line(Point{x: 300, y: 10}, Point{x: 500, y: 100}, Rgba(0xeeeeeeee));
-            fb.draw_line(Point{x: 300, y: 10}, Point{x: 400, y: 220}, Rgba(0xeeeeeeee));
+        fb.draw_line(Point{x: 530, y: 120}, Point{x: 330, y: 10}, Rgba(0xeeeeeeee));
+        fb.draw_line(Point{x: 330, y: 120}, Point{x: 530, y: 10}, Rgba(0xeeeeeeee));
 
-            fb.draw_line(Point{x: 100, y: 220}, Point{x: 300, y: 100}, Rgba(0xeeeeeeee));
-            fb.draw_line(Point{x: 100, y: 220}, Point{x: 300, y: 10}, Rgba(0xeeeeeeee));
+        fb.draw_line(Point{x: 300, y: 10}, Point{x: 500, y: 100}, Rgba(0xeeeeeeee));
+        fb.draw_line(Point{x: 300, y: 10}, Point{x: 400, y: 220}, Rgba(0xeeeeeeee));
 
-            for r in (100..150).filter(|x| x % 5 == 0) {
-                fb.draw_circle(Point{x: 200, y: 200}, r, Rgba::from(0, g as u8, 0xff));
-            }
+        fb.draw_line(Point{x: 100, y: 220}, Point{x: 300, y: 100}, Rgba(0xeeeeeeee));
+        fb.draw_line(Point{x: 100, y: 220}, Point{x: 300, y: 10}, Rgba(0xeeeeeeee));
 
-            fb.spread_circle(Point{x: 400, y: 100}, 90, Rgba::from(0, g as u8, 0xee));
-
-            fb.draw_rect(Point{x:199, y: 199}, 202, 102, Rgba::from(0x00, g as u8, 0xff));
-            fb.fill_rect(Point{x:200, y: 200}, 200, 100, Rgba::from(0x80, g as u8, 0x80));
-
-            fb.draw_rect(Point{x:199, y: 309}, 302, 102, Rgba::from(0x00, g as u8, 0xff));
-            fb.fill_rect(Point{x:200, y: 310}, 300, 100, Rgba::from(0xa0, g as u8, 0x80));
-
-            fb.draw_rect(Point{x:199, y: 419}, 392, 102, Rgba::from(0x00, g as u8, 0xff));
-            fb.fill_rect(Point{x:200, y: 420}, 390, 100, Rgba::from(0xe0, g as u8, 0x80));
-
-            fb.draw_char(Point{x:300, y: 550}, b'A', Rgba(0x000000ff), Rgba(0x00ff0000));
-            fb.draw_str(Point{x:40, y: 550}, b"Loading SOS...", Rgba(0x000000ff), Rgba(0x00ff0000));
-            fb.blit_copy(Point{x: 200, y: 100}, Point{x: 40, y: 550},  200, 20);
-            fb.blit_copy(Point{x: 150, y: 150}, Point{x: 50, y: 50}, 350, 350);
-
-            printk!(Debug, "loop {}\n\r", g);
-            //unsafe { x86_64::instructions::interrupts::enable(); }
+        for r in (100..150).filter(|x| x % 5 == 0) {
+            fb.draw_circle(Point{x: 200, y: 200}, r, Rgba::from(0, g as u8, 0xff));
         }
 
+        fb.spread_circle(Point{x: 400, y: 100}, 90, Rgba::from(0, g as u8, 0xee));
 
+        fb.draw_rect(Point{x:199, y: 199}, 202, 102, Rgba::from(0x00, g as u8, 0xff));
+        fb.fill_rect(Point{x:200, y: 200}, 200, 100, Rgba::from(0x80, g as u8, 0x80));
+
+        fb.draw_rect(Point{x:199, y: 309}, 302, 102, Rgba::from(0x00, g as u8, 0xff));
+        fb.fill_rect(Point{x:200, y: 310}, 300, 100, Rgba::from(0xa0, g as u8, 0x80));
+
+        fb.draw_rect(Point{x:199, y: 419}, 392, 102, Rgba::from(0x00, g as u8, 0xff));
+        fb.fill_rect(Point{x:200, y: 420}, 390, 100, Rgba::from(0xe0, g as u8, 0x80));
+
+        fb.draw_char(Point{x:300, y: 550}, b'A', Rgba(0x000000ff), Rgba(0x00ff0000));
+        fb.draw_str(Point{x:40, y: 550}, b"Loading SOS...", Rgba(0x000000ff), Rgba(0x00ff0000));
+        fb.blit_copy(Point{x: 200, y: 100}, Point{x: 40, y: 550},  200, 20);
+        fb.blit_copy(Point{x: 150, y: 150}, Point{x: 50, y: 50}, 350, 350);
+
+        printk!(Debug, "loop {}\n\r", g);
+    }
 }
 
 fn test_kheap_allocator() {
@@ -131,9 +127,7 @@ pub extern fn kernel_main(mb2_header: usize) {
     let fb = mbinfo.framebuffer_tag().expect("framebuffer tag is unavailale");
     let mut mm = memory::init(&mbinfo);
 
-    if cfg!(feature = "test") {
-        test_kheap_allocator();
-    }
+    if cfg!(feature = "test") { test_kheap_allocator(); }
 
     interrupts::init(&mut mm);
     if cfg!(feature = "test") { interrupts::test_idt(); }
