@@ -12,7 +12,7 @@ use core::ops::Range;
 use self::stack_allocator::StackAllocator;
 use self::inactive::InactivePML4Table;
 
-use spin;
+use spin::{Mutex, Once};
 use kheap_allocator;
 use multiboot2::*;
 
@@ -59,7 +59,9 @@ impl<'a> MemoryManager<'a> {
 
 }
 
-pub fn init<'a>(mbinfo: &'a BootInformation) -> MemoryManager<'a> {
+pub static MM: Once<Mutex<MemoryManager<'static>>> = Once::new();
+
+pub fn init(mbinfo: &'static BootInformation) -> &'static Mutex<MemoryManager<'static>> {
     #[inline]
     fn align_up(start: usize, align: usize) -> usize {
         ((start + align - 1) / align) * align
@@ -140,15 +142,17 @@ pub fn init<'a>(mbinfo: &'a BootInformation) -> MemoryManager<'a> {
         StackAllocator::new(start, end)
     };
 
-    MemoryManager {
-        activePML4Table: ActivePML4Table::new(),
-        kernelPML4Table: InactivePML4Table {
-            pml4_frame: Frame::from_paddress(::kern::arch::cpu::cr3())
-        },
-        areaFrameAllocator: afa,
-        stackAllocator: stack_allocator,
-        mbinfo: mbinfo
-    }
+    MM.call_once(|| {
+        Mutex::new(MemoryManager {
+            activePML4Table: ActivePML4Table::new(),
+            kernelPML4Table: InactivePML4Table {
+                pml4_frame: Frame::from_paddress(::kern::arch::cpu::cr3())
+            },
+            areaFrameAllocator: afa,
+            stackAllocator: stack_allocator,
+            mbinfo: mbinfo
+        })
+    })
 }
 
 fn test_frame_allocator(afa: &mut AreaFrameAllocator) {

@@ -9,6 +9,7 @@
 #![feature(core_slice_ext)]
 // stabled since 1.17
 #![feature(field_init_shorthand)]
+#![feature(drop_types_in_const)]
 #![no_std]
 
 extern crate rlibc;
@@ -125,12 +126,15 @@ pub extern fn kernel_main(mb2_header: usize) {
     printk!(Debug, "_start {:#X}, _end {:#X}, sp top: {:#X}\n\r", pa, pe, sp_top);
 
     let fb = mbinfo.framebuffer_tag().expect("framebuffer tag is unavailale");
-    let mut mm = memory::init(&mbinfo);
+    let mm = memory::init(mbinfo);
 
     if cfg!(feature = "test") { test_kheap_allocator(); }
 
-    interrupts::init(&mut mm);
-    if cfg!(feature = "test") { interrupts::test_idt(); }
+    {
+        let mut mm = mm.lock();
+        interrupts::init(&mut mm);
+        if cfg!(feature = "test") { interrupts::test_idt(); }
+    }
 
     if fb.frame_type == multiboot2::FramebufferType::Rgb {
         let mut fb = Framebuffer::new(&fb);
@@ -148,7 +152,7 @@ pub extern fn kernel_main(mb2_header: usize) {
         }
     }
 
-    task::init(&mut mm);
+    task::init();
 
     loop {
         kern::util::cpu_relax();

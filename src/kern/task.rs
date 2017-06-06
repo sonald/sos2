@@ -1,12 +1,18 @@
 use ::kern::memory::inactive::InactivePML4Table;
 use ::kern::memory::stack_allocator::{Stack, StackAllocator};
-use ::kern::memory::MemoryManager;
+use ::kern::memory::{MemoryManager, MM};
 use ::kern::console::LogLevel::*;
 use ::kern::console::{Console, tty1};
-use core::sync::atomic::{AtomicUsize, Ordering};
-use x86_64::instructions::interrupts;
+use ::kern::arch::cpu;
 
-use spin::Mutex;
+use core::sync::atomic::{AtomicIsize, Ordering};
+use x86_64::instructions::interrupts;
+use collections::string::{String, ToString};
+use collections::BTreeMap;
+use alloc::arc::Arc;
+use core::ops::{Deref, DerefMut};
+
+use spin::*;
 
 pub type ProcId = isize;
 
@@ -49,11 +55,11 @@ impl Context {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Task {
     pub pid: ProcId,
     pub ppid: ProcId,
-    pub name: Box<[char]>,
+    pub name: Option<String>,
     pub cr3: Option<InactivePML4Table>,
     pub kern_stack: Option<Stack>,
     pub ctx: Context,
@@ -64,6 +70,8 @@ impl Task {
     pub const fn empty() -> Task {
         Task {
             pid: 0,
+            ppid: 0,
+            name: None,
             cr3: None,
             kern_stack: None,
             state: TaskState::Unused,
@@ -74,66 +82,129 @@ impl Task {
 
 pub const MAX_TASK: usize = 64;
 
+type TaskMap = BTreeMap<ProcId, Arc<RwLock<Task>>>;
+
 pub struct TaskList {
-    pub tasks: [Task; MAX_TASK], // item 0 is left as empty
-    pub nr: usize
+    pub tasks: TaskMap,
+    pub next_id: ProcId,
 }
 
 impl TaskList {
-    pub const fn new() -> TaskList {
+    pub fn new() -> TaskList {
         TaskList {
-            tasks: [Task::empty(); MAX_TASK],
-            nr: 0
+            tasks: BTreeMap::new(),
+            next_id: 1
         }
+    }
+
+    pub fn get() -> RwLockReadGuard<'static, TaskList> {
+        TASKS.call_once(init_tasks).read()
+    }
+
+    pub fn get_mut() -> RwLockWriteGuard<'static, TaskList> {
+        TASKS.call_once(init_tasks).write()
+    }
+
+    pub fn get_task(&self, id: ProcId) -> Option<&Arc<RwLock<Task>>> {
+        self.tasks.get(&id)
+    }
+
+    pub fn current(&self) -> Option<&Arc<RwLock<Task>>> {
+        self.get_task(CURRENT_ID.load(Ordering::SeqCst))
+    }
+
+    pub fn alloc_task(&mut self, name: &str, parent: ProcId, rip: usize) {
+        use core::mem::size_of;
+
+        let stack = {
+            let mut mm = MM.try().unwrap().lock();
+            mm.alloc_stack(2)
+        };
+
+        let pid = self.next_id;
+        assert(self.next_id >= MAX_TASK, "task id exceeds maximum boundary");
+
+        let mut task = Task::empty();
+        task.pid = pid as isize;
+        task.ppid = if pid > 1 {parent} else {0};
+        task.name = Some(name.to_string());
+        task.state = TaskState::Created;
+        task.kern_stack = stack;
+        task.ctx = Context::new();
+
+        let kern_rsp = stack.as_ref().map(|st| st.top()).unwrap() - size_of::<usize>();
+        task.ctx.rflags = 0x0202;
+        task.ctx.rsp = kern_rsp;
+        unsafe {
+            *(kern_rsp as *mut usize) = rip;
+        }
+
+        task.cr3 = None; //share with kernel
+        self.entry(pid).or_insert(Arc::new(RwLock::new(task)));
+        self.next_id += 1;
     }
 }
 
-pub static mut TASKS: TaskList = TaskList::new();
-pub static CURRENT_ID: AtomicUsize = AtomicUsize::new(0);
+impl Deref for TaskList {
+    type Target = TaskMap;
+    fn deref(&self) -> &Self::Target {
+        &self.tasks
+    }
+}
 
-pub fn init(mm: &mut MemoryManager) {
+impl DerefMut for TaskList {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.tasks
+    }
+}
+
+static TASKS: Once<RwLock<TaskList>> = Once::new();
+pub static CURRENT_ID: AtomicIsize = AtomicIsize::new(0);
+
+fn init_tasks() -> RwLock<TaskList> { RwLock::new(TaskList::new()) }
+
+pub fn init() {
     printk!(Info, "tasks init\n\r");
-    use core::mem::size_of;
-    use ::kern::arch::cpu;
 
-    unsafe {
+    {
         let oflags = unsafe { cpu::push_flags() };
 
-        let init_stack = mm.alloc_stack(1).expect("alloc init task stack failed\n\r");
-        printk!(Info, "alloc init stack {:#x}\n\r", init_stack.bottom());
-
-        let mut task;
         let rips = [
             idle as usize,
             test_thread as usize,
             test_thread2 as usize,
             test_thread3 as usize
         ];
+        let names = [
+            &"idle",
+            &"kthread1",
+            &"kthread2",
+            &"kthread3",
+        ];
+
+        let mut tasks = TaskList::get_mut();
         for (id, &rip) in rips.iter().enumerate() {
-            let pid = id + 1;
-            task = &mut TASKS.tasks[pid];
-            task.pid = pid as isize;
-            task.state = TaskState::Created;
-            task.kern_stack = mm.alloc_stack(2);
-            task.ctx = Context::new();
-
-            let kern_rsp = task.kern_stack.as_ref().map(|st| st.top()).unwrap() - size_of::<usize>();
-            task.ctx.rflags = 0x0202;
-            task.ctx.rsp = kern_rsp;
-            *(kern_rsp as *mut usize) = rip;
-
-            task.cr3 = None; //share with kernel
+            tasks.alloc_task(names[id], 1, rip);
             //printk!(Info, "{:?}\n\r", task);
         }
 
-        TASKS.nr = rips.len();
-
-        cpu::pop_flags(oflags);
+        unsafe { cpu::pop_flags(oflags); }
     }
 
 
     CURRENT_ID.store(1, Ordering::Release);
-    unsafe { start_tasking(&mut TASKS.tasks[1]); }
+    { 
+        let init: *mut Task;
+        let oflags = unsafe { cpu::push_flags() };
+        {
+            let tasks = TaskList::get();
+            let task_lock = tasks.current().expect("");
+            let mut task = task_lock.write();
+            init = task.deref_mut() as *mut Task;
+        }
+        unsafe { cpu::pop_flags(oflags); }
+        unsafe { start_tasking(&mut *init); }
+    }
 
     printk!(Info, "tasks done\n\r");
 }
@@ -240,3 +311,25 @@ unsafe extern "C" fn start_tasking(next: &mut Task) {
     //NOTE: rbp is used by switch_to, to override rbp at the end
     asm!("movq $0, %rbp"  :: "r"(next.ctx.rbp) :"memory": "volatile");
 }
+
+pub unsafe fn sched() {
+    let id = CURRENT_ID.load(Ordering::Acquire);
+    if id == 0 { return  }
+
+    let tasks = TaskList::get();
+    let nid = if id + 1 > tasks.len() as ProcId { 1 } else { id + 1 };
+    CURRENT_ID.store(nid, Ordering::Release);
+    //printk!(Debug, "switch to {:?}\n", TASKS.tasks[nid].ctx);
+    let current: *mut Task;
+    let next: *mut Task;
+
+    {
+        let current_lock = tasks.get_task(id as ProcId).expect("sched: get current task error");
+        current = current_lock.write().deref_mut() as *mut Task;
+        let next_lock = tasks.get_task(nid as ProcId).expect("sched: get next task error");
+        next = next_lock.write().deref_mut() as *mut Task;
+    }
+
+    switch_to(&mut *current, &mut *next); 
+}
+

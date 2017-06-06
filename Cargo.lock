@@ -45,7 +45,7 @@ dependencies = [
 [[package]]
 name = "multiboot2"
 version = "0.3.2"
-source = "git+https://github.com/sonald/multiboot2-elf64#f09ee86c192e09ef09790be6abece5e7b918754d"
+source = "git+https://github.com/sonald/multiboot2-elf64#55b84360d11cf060e2871d269164f6bf4f9effaa"
 dependencies = [
  "bitflags 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]

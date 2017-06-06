@@ -49,9 +49,7 @@ impl Timer {
 pub extern "C" fn timer_handler(frame: &mut ExceptionStackFrame) {
     use ::kern::console::tty1;
 
-    unsafe {
-        PIC_CHAIN.lock().eoi(0);
-    }
+    unsafe { PIC_CHAIN.lock().eoi(0); }
     
     let old = TIMER_TICKS.fetch_add(1, Ordering::SeqCst);
     if (old + 1) % HZ as usize == 0 {
@@ -60,14 +58,6 @@ pub extern "C" fn timer_handler(frame: &mut ExceptionStackFrame) {
         });
     }
 
-    let id = CURRENT_ID.load(Ordering::Acquire);
-    if id > 0 {
-        unsafe {
-            let nid = if id + 1 > TASKS.nr { 1 } else { id + 1 };
-            CURRENT_ID.store(nid, Ordering::Release);
-            //printk!(Debug, "switch to {:?}\n", TASKS.tasks[nid].ctx);
-            switch_to(&mut TASKS.tasks[id], &mut TASKS.tasks[nid]); 
-        }
-    }
+    unsafe { sched(); }
 }
 
