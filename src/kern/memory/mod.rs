@@ -6,7 +6,6 @@ pub mod stack_allocator;
 
 pub use self::stack_allocator::Stack;
 
-use self::frame::*;
 use self::paging::*;
 use core::ops::Range;
 use self::stack_allocator::StackAllocator;
@@ -47,14 +46,13 @@ pub const KERNEL_MAPPING: MemorySchema = MemorySchema {
 pub struct MemoryManager<'a> {
     pub activePML4Table: ActivePML4Table,
     pub kernelPML4Table: InactivePML4Table,
-    pub areaFrameAllocator: AreaFrameAllocator,
     pub stackAllocator: StackAllocator,
     pub mbinfo: &'a BootInformation
 }
 
 impl<'a> MemoryManager<'a> {
     pub fn alloc_stack(&mut self, size_in_pages: usize) -> Option<Stack> {
-        self.stackAllocator.alloc_stack(&mut self.activePML4Table, &mut self.areaFrameAllocator, size_in_pages)
+        self.stackAllocator.alloc_stack(&mut self.activePML4Table, size_in_pages)
     }
 
 }
@@ -68,50 +66,19 @@ pub fn init(mbinfo: &'static BootInformation) -> &'static Mutex<MemoryManager<'s
     }
 
     printk!(Info, "memory system init.\n\r");
-    let kernel_base = KERNEL_MAPPING.KernelMap.start;
-
-    let mmap = mbinfo.memory_map_tag().expect("memory map is unavailable");
-    let start = mmap.memory_areas().map(|a| a.base_addr).min().unwrap();
-    let end = mmap.memory_areas().map(|a| a.base_addr + a.length).max().unwrap();
-    printk!(Info, "mmap start: {:#x}, end: {:#x}\n\r", start ,end);
-
-    let elf = mbinfo.elf_sections_tag().expect("elf sections is unavailable");
-    let mut kernel_start = elf.sections().filter(|a| a.is_allocated()).map(|a| a.addr).min().unwrap() as usize;
-    let mut kernel_end = elf.sections().filter(|a| a.is_allocated()).map(|a| a.addr + a.size).max().unwrap() as usize;
-
-    if kernel_start > kernel_base {
-        kernel_start -= kernel_base;
-    }
-    if kernel_end > kernel_base {
-        kernel_end -= kernel_base;
-    }
-    printk!(Info, "kernel start: {:#x}, end: {:#x}\n\r", kernel_start, kernel_end);
-
-
-    let (mb_start, mb_end) = (mbinfo.start_address() - kernel_base,
-    mbinfo.end_address() - kernel_base);
-    printk!(Info, "mboot2 start: {:#x}, end: {:#x}\n\r", mb_start, mb_end);
-
-    let kr = Range {
-        start: Frame::from_paddress(kernel_start),
-        end: Frame::from_paddress(kernel_end - 1) + 1,
-    };
-    let mr = Range {
-        start: Frame::from_paddress(mb_start),
-        end: Frame::from_paddress(mb_end - 1) + 1,
-    };
-    let mut afa = AreaFrameAllocator::new(mmap.memory_areas(), kr, mr);
+    
+    frame::init(mbinfo);
 
     if cfg!(feature = "test") {
-        test_frame_allocator(&mut afa);
-        test_paging_before_remap(&mut afa);
+        test_frame_allocator();
+        test_paging_before_remap();
     }
     ::kern::arch::cpu::enable_nxe_bit();
     ::kern::arch::cpu::enable_write_protect_bit();
-    remap_the_kernel(&mut afa, &mbinfo);
+    remap_the_kernel(&mbinfo);
     if cfg!(feature = "test") {
-        test_frame_allocator(&mut afa);
-        test_paging_after_remap(&mut afa);
+        test_frame_allocator();
+        test_paging_after_remap();
     }
 
     {
@@ -130,7 +97,7 @@ pub fn init(mbinfo: &'static BootInformation) -> &'static Mutex<MemoryManager<'s
         let range = PageRange::new(start_address, start_address + alloc_size);
         printk!(Info, "map heap [{:#x}, {:#x})\n\r", start_address, start_address + alloc_size);
         for page in range {
-            active.map(page, WRITABLE, &mut afa);
+            active.map(page, WRITABLE);
         }
     }
 
@@ -146,23 +113,20 @@ pub fn init(mbinfo: &'static BootInformation) -> &'static Mutex<MemoryManager<'s
         Mutex::new(MemoryManager {
             activePML4Table: ActivePML4Table::new(),
             kernelPML4Table: InactivePML4Table {
-                pml4_frame: Frame::from_paddress(::kern::arch::cpu::cr3())
+                pml4_frame: frame::Frame::from_paddress(::kern::arch::cpu::cr3())
             },
-            areaFrameAllocator: afa,
             stackAllocator: stack_allocator,
             mbinfo: mbinfo
         })
     })
 }
 
-fn test_frame_allocator(afa: &mut AreaFrameAllocator) {
-    //printk!(Debug, "{:#?}\n\r", afa);
-
+fn test_frame_allocator() {
     let mut i = 0;
-    while let Some(_) = afa.alloc_frame() {
+    while let Some(_) = frame::alloc_frame() {
         //printk!(Warn, "0x{:x}  ", f.number);
         i += 1;
-        if i == 100 { break }
+        if i == 400 { break }
     }
     printk!(Warn, "allocated #{} frames\n\r", i);
 }

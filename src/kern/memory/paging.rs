@@ -1,5 +1,5 @@
 use core::ops::{Range, Add, AddAssign};
-use super::frame::{Frame, FrameAllocator, FrameRange, AreaFrameAllocator};
+use super::frame::{Frame, FrameRange, alloc_frame};
 use super::mapper::Mapper;
 use super::{PAGE_SIZE, KERNEL_MAPPING};
 use super::inactive::{InactivePML4Table, TemporaryPage};
@@ -246,10 +246,10 @@ impl<L> Table<L> where L: HierarchyTableLevel {
             .map(|address| unsafe {&mut *(address as *mut _)})
     }
 
-    pub fn next_level_table_or_create<A>(&mut self, index: usize, allocator: &mut A) 
-        -> &mut Table<L::NextLevel> where A: FrameAllocator {
+    pub fn next_level_table_or_create(&mut self, index: usize) 
+        -> &mut Table<L::NextLevel> {
         if self.next_level_table(index).is_none() {
-            let frame = allocator.alloc_frame().expect("no more free frame available");
+            let frame = alloc_frame().expect("no more free frame available");
             self.entries[index].set(frame, WRITABLE | PRESENT);
             self.next_level_table_mut(index).unwrap().zero()
         } else {
@@ -309,17 +309,16 @@ impl ActivePML4Table {
     }
 }
 
-pub fn create_address_space<A>(allocator: &mut A, mbinfo: &BootInformation)
-    -> InactivePML4Table where A: FrameAllocator {
-
+pub fn create_address_space(mbinfo: &BootInformation) -> InactivePML4Table {
     let kernel_base = KERNEL_MAPPING.KernelMap.start;
     let mut active = ActivePML4Table::new();
+
     //FIXME: this magic address should be taken care of, prevent from conflicting
     //with normal addresses, maybe mark it with unusable
-    let mut temp_page = TemporaryPage::new(Page::from_vaddress(0xfffff_cafe_beef_000), allocator);
+    let mut temp_page = TemporaryPage::new(Page::from_vaddress(0xfffff_cafe_beef_000));
 
     let mut new_map = {
-        let frame = allocator.alloc_frame().expect("no more memory");
+        let frame = alloc_frame().expect("no more memory");
         InactivePML4Table::new(frame, &mut active, &mut temp_page)
     };
 
@@ -352,7 +351,7 @@ pub fn create_address_space<A>(allocator: &mut A, mbinfo: &BootInformation)
                     flags);
                 for f in r {
                     let page = Page::from_vaddress(f.start_address() + kernel_base);
-                    mapper.map_to(page, f, flags, allocator);
+                    mapper.map_to(page, f, flags);
                 }
             } else {
                 //gdt's been replaced later with a new one, only the stack needed here
@@ -369,7 +368,7 @@ pub fn create_address_space<A>(allocator: &mut A, mbinfo: &BootInformation)
                 r.next();
                 for f in r {
                     let page = Page::from_vaddress(f.start_address() + kernel_base);
-                    mapper.map_to(page, f, flags, allocator);
+                    mapper.map_to(page, f, flags);
                 }
 
             }
@@ -387,7 +386,7 @@ pub fn create_address_space<A>(allocator: &mut A, mbinfo: &BootInformation)
                     r.start.start_address(), r.end.start_address());
             for f in r {
                 let page = Page::from_vaddress(f.start_address() + kernel_base);
-                mapper.map_to(page, f, WRITABLE, allocator);
+                mapper.map_to(page, f, WRITABLE);
             }
         }
 
@@ -401,7 +400,7 @@ pub fn create_address_space<A>(allocator: &mut A, mbinfo: &BootInformation)
                     r.start.start_address(), r.end.start_address());
             for f in r {
                 let page = Page::from_vaddress(f.start_address() + kernel_base);
-                mapper.map_to(page, f, WRITABLE, allocator);
+                mapper.map_to(page, f, WRITABLE);
             }
         }
 
@@ -413,7 +412,7 @@ pub fn create_address_space<A>(allocator: &mut A, mbinfo: &BootInformation)
                 mbinfo.start_address());
             for f in r {
                 let page = Page::from_vaddress(f.start_address() + kernel_base);
-                mapper.map_to(page, f, EntryFlags::empty(), allocator);
+                mapper.map_to(page, f, EntryFlags::empty());
             }
         }
 
@@ -423,10 +422,9 @@ pub fn create_address_space<A>(allocator: &mut A, mbinfo: &BootInformation)
     new_map
 }
 
-pub fn remap_the_kernel<A>(allocator: &mut A, mbinfo: &BootInformation) where A: FrameAllocator {
-    let mut new_map = create_address_space(allocator, mbinfo);
-    let old_map = switch(new_map);
-    printk!(Info, "switching kernel map from {:?} to {:?}\n\r", old_map, new_map);
+pub fn remap_the_kernel(mbinfo: &BootInformation) {
+    let mut new_map = create_address_space(mbinfo);
+    switch(new_map);
 }
 
 pub fn switch(new_map: InactivePML4Table) -> InactivePML4Table {
@@ -436,13 +434,15 @@ pub fn switch(new_map: InactivePML4Table) -> InactivePML4Table {
         ::kern::arch::cpu::cr3_set(new_map.pml4_frame.start_address());
     }
 
+    printk!(Info, "switching map from {:?} to {:?}\n\r", old, new_map);
     InactivePML4Table {
         pml4_frame: old
     }
 }
 
-pub fn test_paging_before_remap<A>(allocator: &mut A) where A: FrameAllocator {
+pub fn test_paging_before_remap() {
     let mut pml4 = ActivePML4Table::new();
+    printk!(Debug, "test_paging_before_remap\n\r");
 
     {
         // first 1G is contains huge pages
@@ -458,12 +458,6 @@ pub fn test_paging_before_remap<A>(allocator: &mut A) where A: FrameAllocator {
         assert!(unsafe {p2 as *const _ as usize} == 0o177_777_777_777_777_000_0000);
         assert!(p.next_level_table(1).is_none());
     }
-
-    //{
-        //let fb: VirtualAddress = 0xfd00_0000;
-        //pml4.translate(fb).expect("fb mapping failed");
-        //assert!(pml4.translate(fb).unwrap() == fb);
-    //}
 
     {
         let vs = [0x3000_0000, 0x2000_0030, 0x1002_5030, 0x0702_5030];
@@ -482,10 +476,10 @@ pub fn test_paging_before_remap<A>(allocator: &mut A) where A: FrameAllocator {
     {
         use core::slice::from_raw_parts_mut;
 
-        let frame = allocator.alloc_frame().expect("no more mem");
+        let frame = alloc_frame().expect("no more mem");
         let page = Page::from_vaddress(0x6218_2035_3201);
         assert!(pml4.translate(page.start_address()).is_none());
-        pml4.map_to(page, frame, EntryFlags::empty(), allocator);
+        pml4.map_to(page, frame, EntryFlags::empty());
         printk!(Debug, "map {:#x} -> {:#x}\n\r", page.start_address(), frame.start_address());
 
         let mut v = unsafe { from_raw_parts_mut(page.start_address() as *mut u8, 4096) };
@@ -497,29 +491,29 @@ pub fn test_paging_before_remap<A>(allocator: &mut A) where A: FrameAllocator {
         for &p in v.iter() { assert!(p == 0xBA); }
 
         let page2 = Page { number: page.number + 100 };
-        pml4.map(page2, USER, allocator);
+        pml4.map(page2, USER);
         let mut v2 = unsafe { from_raw_parts_mut(page2.start_address() as *mut u8, 4096) };
         for p in v2.iter_mut() {
             *p = 3;
         }
 
-        pml4.unmap(page, allocator);
+        pml4.unmap(page);
         // this works cause cr0.WP is not set yet
         for p in v2.iter_mut() { *p = 3; }
     }
 }
 
 
-pub fn test_paging_after_remap<A>(allocator: &mut A) where A: FrameAllocator {
+pub fn test_paging_after_remap() {
     let mut pml4 = ActivePML4Table::new();
 
     {
         use core::slice::from_raw_parts_mut;
 
-        let frame = allocator.alloc_frame().expect("no more mem");
+        let frame = alloc_frame().expect("no more mem");
         let page = Page::from_vaddress(0x7fff_DEAD_BEEF);
         assert!(pml4.translate(page.start_address()).is_none());
-        pml4.map_to(page, frame, WRITABLE, allocator);
+        pml4.map_to(page, frame, WRITABLE);
         printk!(Debug, "map {:#x} -> {:#x}\n\r", page.start_address(), frame.start_address());
 
         let mut v = unsafe { from_raw_parts_mut(page.start_address() as *mut u8, 4096) };
@@ -533,13 +527,13 @@ pub fn test_paging_after_remap<A>(allocator: &mut A) where A: FrameAllocator {
         }
 
         let page2 = Page { number: page.number + 100 };
-        pml4.map(page2, WRITABLE, allocator);
+        pml4.map(page2, WRITABLE);
         let mut v2 = unsafe { from_raw_parts_mut(page2.start_address() as *mut u8, 4096) };
         for p in v2.iter_mut() {
             *p = 3;
         }
 
-        pml4.unmap(page, allocator);
+        pml4.unmap(page);
         //for p in v2.iter_mut() { *p = 3; }
     }
 }

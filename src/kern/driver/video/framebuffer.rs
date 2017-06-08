@@ -69,7 +69,7 @@ impl Framebuffer {
     }
 
     pub unsafe fn get_mut(&mut self) -> *mut Rgba {
-        self.buf.get_mut() as *mut _
+        self.buf.as_mut() as *mut _
     }
 
     //TODO: optimize situation when dy == 0

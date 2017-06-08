@@ -1,5 +1,5 @@
 use core::ptr::Unique;
-use super::frame::{Frame, FrameAllocator};
+use super::frame::{Frame, alloc_frame, dealloc_frame};
 use super::paging::*;
 
 pub struct Mapper {
@@ -29,11 +29,11 @@ impl Mapper {
     } 
 
     pub fn get(&self) -> &Table<PML4T> {
-        unsafe { self.top.get() }
+        unsafe { self.top.as_ref() }
     }
 
     pub fn get_mut(&mut self) -> &mut Table<PML4T> {
-        unsafe { self.top.get_mut() }
+        unsafe { self.top.as_mut() }
     }
 
     pub fn translate(&self, vaddr: VirtualAddress) -> Option<PhysicalAddress> {
@@ -80,33 +80,30 @@ impl Mapper {
     }
 
     //FIXME: need to check if frame has been used
-    pub fn map_to<A>(&mut self, page: Page, frame: Frame, flags: EntryFlags, allocator: &mut A) 
-        where A: FrameAllocator {
+    pub fn map_to(&mut self, page: Page, frame: Frame, flags: EntryFlags) {
         let vaddr = page.start_address() as VirtualAddress;
 
-        let pdpt = self.next_level_table_or_create(vaddr.pml4t_index(), allocator);
-        let pdt = pdpt.next_level_table_or_create(vaddr.pdpt_index(), allocator);
-        let pt = pdt.next_level_table_or_create(vaddr.pdt_index(), allocator);
+        let pdpt = self.next_level_table_or_create(vaddr.pml4t_index());
+        let pdt = pdpt.next_level_table_or_create(vaddr.pdpt_index());
+        let pt = pdt.next_level_table_or_create(vaddr.pdt_index());
 
         assert!(pt[vaddr.pt_index()].is_unused());
         pt[vaddr.pt_index()].set(frame, flags | PRESENT);
     }
 
 
-    pub fn map<A>(&mut self, page: Page, flags: EntryFlags, allocator: &mut A) 
-        where A: FrameAllocator {
-        let frame = allocator.alloc_frame().expect("not more free frame available");
-        self.map_to(page, frame, flags, allocator)
+    pub fn map(&mut self, page: Page, flags: EntryFlags) {
+        let frame = alloc_frame().expect("not more free frame available");
+        self.map_to(page, frame, flags)
     }
 
-    pub fn identity_map<A>(&mut self, frame: Frame, flags: EntryFlags, allocator: &mut A)
-        where A: FrameAllocator {
+    pub fn identity_map(&mut self, frame: Frame, flags: EntryFlags) {
         let page = Page::from_vaddress(frame.start_address());
-        self.map_to(page, frame, flags, allocator)
+        self.map_to(page, frame, flags)
     }
 
     //TODO: support huge page
-    pub fn unmap<A>(&mut self, page: Page, allocator: &mut A) where A: FrameAllocator {
+    pub fn unmap(&mut self, page: Page) {
         let vaddr = page.start_address() as VirtualAddress;
         assert!(self.translate(vaddr).is_some(), "vaddr {:#x} doest exist in mapping", vaddr);
 
@@ -123,7 +120,7 @@ impl Mapper {
 
                 ::kern::arch::cpu::tlb_flush(vaddr);
                 //TODO: free pdpt, pdt, pt tables when empty
-                //allocator.dealloc_frame(frame);
+                //dealloc_frame(frame);
                 Some(())
             })
             .or_else(huge_page);

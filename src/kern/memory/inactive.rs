@@ -29,11 +29,11 @@ impl FrameAllocator for TinyAllocator {
 }
 
 impl TinyAllocator {
-    pub fn new<A>(base_allocator: &mut A) -> TinyAllocator where A: FrameAllocator {
+    pub fn new() -> TinyAllocator {
         let data = [
-            base_allocator.alloc_frame(),
-            base_allocator.alloc_frame(),
-            base_allocator.alloc_frame(),
+            super::frame::alloc_frame(),
+            super::frame::alloc_frame(),
+            super::frame::alloc_frame(),
         ];
         TinyAllocator {
             frames: data
@@ -47,17 +47,17 @@ pub struct TemporaryPage {
 }
 
 impl TemporaryPage {
-    pub fn new<A>(page: Page, base_allocator: &mut A) -> TemporaryPage where A: FrameAllocator {
+    pub fn new(page: Page) -> TemporaryPage {
         TemporaryPage {
             page: page,
-            allocator: TinyAllocator::new(base_allocator)
+            allocator: TinyAllocator::new()
         }
     }
 
     pub fn map(&mut self, frame: Frame, activePML4Table: &mut ActivePML4Table) -> VirtualAddress {
         assert!(activePML4Table.translate(self.page.start_address()).is_none(),
             "temporary page should not be mapped");
-        activePML4Table.map_to(self.page, frame, WRITABLE|PRESENT, &mut self.allocator);
+        activePML4Table.map_to(self.page, frame, WRITABLE|PRESENT);
         printk!(Debug, "TemporaryPage::map {:x} to {:x}\n\r", frame.start_address(), 
                 self.page.start_address());
         self.page.start_address() as VirtualAddress
@@ -65,7 +65,7 @@ impl TemporaryPage {
 
     pub fn unmap(&mut self, activePML4Table: &mut ActivePML4Table) {
         printk!(Debug, "TemporaryPage::unmap\n\r");
-        activePML4Table.unmap(self.page, &mut self.allocator)
+        activePML4Table.unmap(self.page)
     }
 
 

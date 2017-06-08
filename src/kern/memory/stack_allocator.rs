@@ -1,6 +1,5 @@
 use super::paging::*;
-use super::frame::*;
-use super::{MemoryManager, PAGE_SIZE};
+use super::{PAGE_SIZE};
 
 #[macro_use] use kern::console as con;
 use con::LogLevel::*;
@@ -43,8 +42,8 @@ impl StackAllocator {
         }
     }
 
-    pub fn alloc_stack<A>(&mut self, active: &mut ActivePML4Table, allocator: &mut A,
-                       size_in_pages: usize) -> Option<Stack> where A: FrameAllocator {
+    pub fn alloc_stack(&mut self, active: &mut ActivePML4Table,
+                       size_in_pages: usize) -> Option<Stack> {
         assert!(size_in_pages > 0);
 
         let mut range = self.pages.clone();
@@ -62,7 +61,7 @@ impl StackAllocator {
 
                 let r = PageRange {start: start, end: end+1};
                 for page in r {
-                    active.map(page, WRITABLE, allocator);
+                    active.map(page, WRITABLE);
                 }
 
                 let (top, bottom) = (end.start_address() + PAGE_SIZE, start.start_address());

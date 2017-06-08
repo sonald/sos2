@@ -101,7 +101,7 @@ impl TerminalDriver for ConsoleDriver {
         }
 
         unsafe {
-            let data = (&mut self.buf.get_mut().data).as_mut_ptr();
+            let data = (&mut self.buf.as_mut().data).as_mut_ptr();
             ptr::copy(data.offset(CONSOLE_WIDTH as isize), data, off);
             ptr::copy_nonoverlapping(&blank_line, data.offset(off as isize) as *mut _, 1);
         }
@@ -114,7 +114,7 @@ impl TerminalDriver for ConsoleDriver {
         }; CONSOLE_WIDTH];
 
         unsafe {
-            let data = (&mut self.buf.get_mut().data).as_mut_ptr();
+            let data = (&mut self.buf.as_mut().data).as_mut_ptr();
             for off in 0..CONSOLE_HEIGHT {
                 ptr::copy_nonoverlapping((&blank_line).as_ptr(),
                     data.offset((off * CONSOLE_WIDTH) as isize), size_of_val(&blank_line));
@@ -144,7 +144,7 @@ impl TerminalDriver for ConsoleDriver {
 
     fn draw_byte(&mut self, cursor: usize, byte: Char) {
         unsafe {
-            let p = &mut self.buf.get_mut().data[cursor];
+            let p = &mut self.buf.as_mut().data[cursor];
             write_volatile(p, byte);
         }
     }

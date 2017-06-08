@@ -3,6 +3,8 @@ use core::iter::Iterator;
 use multiboot2::*;
 
 use super::PAGE_SIZE;
+use super::KERNEL_MAPPING;
+use spin::Mutex;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Frame {
@@ -140,4 +142,84 @@ impl AreaFrameAllocator {
     }
 }
 
+
+struct FrameAllocatorProxy<T> {
+    allocator: T
+}
+
+static FRAME_ALLOCATOR: Mutex<Option<FrameAllocatorProxy<AreaFrameAllocator>>> = Mutex::new(None);
+
+impl<T: FrameAllocator> FrameAllocatorProxy<T> {
+    pub fn new(t: T) -> FrameAllocatorProxy<T> {
+        FrameAllocatorProxy {
+            allocator: t
+        }
+    }
+}
+
+impl<T: FrameAllocator> FrameAllocator for FrameAllocatorProxy<T> {
+    fn alloc_frame(&mut self) -> Option<Frame> {
+        self.allocator.alloc_frame()
+    }
+
+    fn dealloc_frame(&mut self, frame: Frame) {
+        self.allocator.dealloc_frame(frame)
+    }
+}
+
+pub fn alloc_frame() -> Option<Frame> {
+    if let Some(ref mut allocator) = *FRAME_ALLOCATOR.lock() {
+        allocator.alloc_frame()
+    } else {
+        panic!("FRAME_ALLOCATOR is not initialized\n");
+    }
+
+}
+
+pub fn dealloc_frame(frame: Frame) {
+    if let Some(ref mut allocator) = *FRAME_ALLOCATOR.lock() {
+        allocator.dealloc_frame(frame)
+    } else {
+        panic!("FRAME_ALLOCATOR is not initialized\n");
+    }
+}
+
+pub fn init(mbinfo: &'static BootInformation) {
+    use ::kern::console as con;
+    use con::LogLevel::*;
+
+    let kernel_base = KERNEL_MAPPING.KernelMap.start;
+    let mmap = mbinfo.memory_map_tag().expect("memory map is unavailable");
+    let start = mmap.memory_areas().map(|a| a.base_addr).min().unwrap();
+    let end = mmap.memory_areas().map(|a| a.base_addr + a.length).max().unwrap();
+    printk!(Info, "mmap start: {:#x}, end: {:#x}\n\r", start ,end);
+
+    let elf = mbinfo.elf_sections_tag().expect("elf sections is unavailable");
+    let mut kernel_start = elf.sections().filter(|a| a.is_allocated()).map(|a| a.addr).min().unwrap() as usize;
+    let mut kernel_end = elf.sections().filter(|a| a.is_allocated()).map(|a| a.addr + a.size).max().unwrap() as usize;
+
+    if kernel_start > kernel_base {
+        kernel_start -= kernel_base;
+    }
+    if kernel_end > kernel_base {
+        kernel_end -= kernel_base;
+    }
+    printk!(Info, "kernel start: {:#x}, end: {:#x}\n\r", kernel_start, kernel_end);
+
+    let (mb_start, mb_end) = (mbinfo.start_address() - kernel_base,
+    mbinfo.end_address() - kernel_base);
+    printk!(Info, "mboot2 start: {:#x}, end: {:#x}\n\r", mb_start, mb_end);
+
+    let kr = Range {
+        start: Frame::from_paddress(kernel_start),
+        end: Frame::from_paddress(kernel_end - 1) + 1,
+    };
+    let mr = Range {
+        start: Frame::from_paddress(mb_start),
+        end: Frame::from_paddress(mb_end - 1) + 1,
+    };
+    let afa = AreaFrameAllocator::new(mmap.memory_areas(), kr, mr);
+    let mut guard = FRAME_ALLOCATOR.lock();
+    *guard = Some(FrameAllocatorProxy::new(afa));
+}
 

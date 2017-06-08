@@ -1,6 +1,7 @@
 use ::kern::memory::inactive::InactivePML4Table;
 use ::kern::memory::stack_allocator::{Stack, StackAllocator};
 use ::kern::memory::{MemoryManager, MM};
+use ::kern::memory::paging;
 use ::kern::console::LogLevel::*;
 use ::kern::console::{Console, tty1};
 use ::kern::arch::cpu;
@@ -55,6 +56,35 @@ impl Context {
     }
 }
 
+/// for task 
+#[derive(Debug, Clone)]
+pub struct VirtualMemoryArea {
+    pub start: usize,
+    pub size: usize,
+    pub mapped: bool,
+    pub flags: paging::EntryFlags,
+}
+
+impl VirtualMemoryArea {
+    pub fn new(start: usize, size: usize, flags: paging::EntryFlags) -> VirtualMemoryArea {
+        assert!(!flags.contains(paging::PRESENT));
+
+        VirtualMemoryArea {
+            start: start,
+            size: size,
+            mapped: false,
+            flags: flags
+        }
+    }
+
+    pub fn map(&mut self, mm: &mut MemoryManager) {
+    }
+
+    pub fn unmap(&mut self, mm: &mut MemoryManager) {
+    }
+}
+
+
 #[derive(Debug, Clone)]
 pub struct Task {
     pub pid: ProcId,
@@ -62,6 +92,8 @@ pub struct Task {
     pub name: Option<String>,
     pub cr3: Option<InactivePML4Table>,
     pub kern_stack: Option<Stack>,
+    pub user_stack: Option<VirtualMemoryArea>,
+    pub code: Option<VirtualMemoryArea>,
     pub ctx: Context,
     pub state: TaskState
 }
@@ -74,13 +106,15 @@ impl Task {
             name: None,
             cr3: None,
             kern_stack: None,
+            user_stack: None,
+            code: None,
             state: TaskState::Unused,
             ctx: Context::new()
         }
     }
 }
 
-pub const MAX_TASK: usize = 64;
+pub const MAX_TASK: isize = 64;
 
 type TaskMap = BTreeMap<ProcId, Arc<RwLock<Task>>>;
 
@@ -122,7 +156,7 @@ impl TaskList {
         };
 
         let pid = self.next_id;
-        assert(self.next_id >= MAX_TASK, "task id exceeds maximum boundary");
+        assert!(self.next_id < MAX_TASK, "task id exceeds maximum boundary");
 
         let mut task = Task::empty();
         task.pid = pid as isize;
@@ -196,12 +230,17 @@ pub fn init() {
     { 
         let init: *mut Task;
         let oflags = unsafe { cpu::push_flags() };
+
         {
             let tasks = TaskList::get();
             let task_lock = tasks.current().expect("");
             let mut task = task_lock.write();
             init = task.deref_mut() as *mut Task;
         }
+
+        let mut mm = MM.try().unwrap().lock();
+        let mut new_map = paging::create_address_space(mm.mbinfo);
+
         unsafe { cpu::pop_flags(oflags); }
         unsafe { start_tasking(&mut *init); }
     }
@@ -298,6 +337,7 @@ pub unsafe extern "C" fn switch_to(current: &mut Task, next: &mut Task) {
 #[inline(never)]
 #[naked]
 unsafe extern "C" fn start_tasking(next: &mut Task) {
+    printk!(Info, "start_tasking\n\r");
     // load context
     asm!("pushq $0; popfq":: "r"(next.ctx.rflags) :"memory": "volatile");
     asm!("movq $0, %rbx"  :: "r"(next.ctx.rbx) :"memory": "volatile");
@@ -319,7 +359,7 @@ pub unsafe fn sched() {
     let tasks = TaskList::get();
     let nid = if id + 1 > tasks.len() as ProcId { 1 } else { id + 1 };
     CURRENT_ID.store(nid, Ordering::Release);
-    //printk!(Debug, "switch to {:?}\n", TASKS.tasks[nid].ctx);
+    //printk!(Debug, "switch to {:?}\n", nid);
     let current: *mut Task;
     let next: *mut Task;
 

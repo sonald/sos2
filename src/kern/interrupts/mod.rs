@@ -54,8 +54,12 @@ extern "C" fn double_fault_handler(frame: &mut ExceptionStackFrame, err_code: u6
 }
 
 extern "C" fn page_fault_handler(frame: &mut ExceptionStackFrame, err_code: u64) {
+    use ::kern::task::CURRENT_ID;
+    use core::sync::atomic::Ordering;
+
     let err = PageFaultErrorCode::from_bits(err_code).unwrap();
-    printk!(Debug, "page fault! {:#?}\n\rerr code: {:#?}, cr2: {:#x}\n\r", frame, err, cr2());
+    printk!(Debug, "page fault! {:#?}\n\rerr code: {:#?}, cr2: {:#x} tid: {:#x}\n\r",
+            frame, err, cr2(), CURRENT_ID.load(Ordering::SeqCst));
     loop {
         unsafe { asm!("hlt"); }
     }
@@ -116,7 +120,7 @@ pub fn init(mm: &mut MemoryManager) {
         PIC_CHAIN.lock().enable(Irqs::IRQ2 as usize);
         PIC_CHAIN.lock().enable(Irqs::TIMER as usize);
         PIC_CHAIN.lock().enable(Irqs::KBD as usize);
-        interrupts::enable();
+        //interrupts::enable();
     }
 }
 

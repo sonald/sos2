@@ -128,7 +128,7 @@ pub extern fn kernel_main(mb2_header: usize) {
     let fb = mbinfo.framebuffer_tag().expect("framebuffer tag is unavailale");
     let mm = memory::init(mbinfo);
 
-    if cfg!(feature = "test") { test_kheap_allocator(); }
+    //if cfg!(feature = "test") { test_kheap_allocator(); }
 
     {
         let mut mm = mm.lock();
