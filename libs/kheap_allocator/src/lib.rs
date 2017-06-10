@@ -8,6 +8,7 @@ extern crate spin;
 use spin::{Mutex, Once};
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::ops::Range;
+use core::ptr;
 
 pub struct KHeapAllocator {
     pub current: usize,
@@ -51,6 +52,17 @@ pub static KHEAP_ALLOCATOR: Mutex<KHeapAllocator> = Mutex::new(KHeapAllocator::n
 #[no_mangle]
 pub extern fn __rust_allocate(size: usize, _align: usize) -> *mut u8 {
     KHEAP_ALLOCATOR.lock().alloc(size, _align).expect("oom")
+}
+
+
+#[no_mangle]
+pub extern fn __rust_allocate_zeroed(size: usize, _align: usize) -> *mut u8 {
+    let ptr = KHEAP_ALLOCATOR.lock().alloc(size, _align).expect("oom");
+    assert!(!ptr.is_null(), "null ptr in allocation");
+    unsafe {
+        ptr::write_bytes(ptr, 0, size)
+    }
+    ptr
 }
 
 #[no_mangle]
