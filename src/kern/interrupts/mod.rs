@@ -17,12 +17,14 @@ use x86_64::registers::flags;
 use ::kern::console::LogLevel::*;
 use ::kern::arch::cpu::cr2;
 use ::kern::memory::MemoryManager;
-use spin::Once;
+use spin::{Once, Mutex};
 
 lazy_static! {
     pub static ref IDT: InterruptDescriptorTable = {
         let mut idt = InterruptDescriptorTable::new();
         idt.page_fault = Entry::new(cs().0, define_handler_with_errno!(page_fault_handler) as u64);
+        idt.general_protection_fault = 
+            Entry::new(cs().0, define_handler_with_errno!(general_protection_fault) as u64);
         idt.breakpoint = Entry::new(cs().0, define_handler!(int3_handler) as u64);
         idt.double_fault = Entry::new(cs().0, define_handler_with_errno!(double_fault_handler) as u64);
         idt.double_fault.options().set_ist_index(IST_INDEX_DBL_FAULT as u16);
@@ -53,6 +55,14 @@ extern "C" fn double_fault_handler(frame: &mut ExceptionStackFrame, err_code: u6
     }
 }
 
+extern "C" fn general_protection_fault(frame: &mut ExceptionStackFrame, err_code: u64) {
+    printk!(Debug, "GPE err code: {:#?}\n\r", err_code);
+
+    loop {
+        unsafe { asm!("hlt"); }
+    }
+}
+
 extern "C" fn page_fault_handler(frame: &mut ExceptionStackFrame, err_code: u64) {
     use ::kern::task::CURRENT_ID;
     use core::sync::atomic::Ordering;
@@ -76,7 +86,7 @@ extern "C" fn divide_by_zero_handler(frame: &mut ExceptionStackFrame) {
 
 const IST_INDEX_DBL_FAULT: usize = 0;
 // single tss
-static TSS: Once<TaskStateSegment> = Once::new();
+pub static mut TSS: TaskStateSegment = TaskStateSegment::new();
 static GDT: Once<GlobalDescriptorTable> = Once::new();
 
 pub fn init(mm: &mut MemoryManager) {
@@ -85,21 +95,28 @@ pub fn init(mm: &mut MemoryManager) {
     use x86_64::instructions::segmentation::set_cs;
     use x86_64::structures::gdt::SegmentSelector;
 
-    let tss = TSS.call_once(|| {
+    {
         let dbl_fault_stack = mm.alloc_stack(1).expect("alloc double_fault stack failed\n\r");
         printk!(Info, "alloc dbl_fault_stack {:#x}\n\r", dbl_fault_stack.bottom());
-        let mut tss = TaskStateSegment::new();
-        tss.interrupt_stack_table[IST_INDEX_DBL_FAULT] = x86_64::VirtualAddress(dbl_fault_stack.top());
-        tss
-    });
+        unsafe {
+            TSS.interrupt_stack_table[IST_INDEX_DBL_FAULT] = x86_64::VirtualAddress(dbl_fault_stack.top());
+        }
+    }
 
     let mut kern_cs_sel = SegmentSelector(0);
     let mut tss_sel = SegmentSelector(0);
+    let mut user_cs_sel = SegmentSelector(0);
     let gdt = GDT.call_once(|| {
         let mut gdt = GlobalDescriptorTable::new();
         kern_cs_sel = gdt.add_entry(Descriptor::kernel_code_segment());
-        tss_sel = gdt.add_entry(Descriptor::tss_segment(tss));
+        user_cs_sel = gdt.add_entry(Descriptor::user_code_segment());
+        let user_ds_sel = gdt.add_entry(Descriptor::user_data_segment());
+        unsafe {
+            tss_sel = gdt.add_entry(Descriptor::tss_segment(&TSS));
+        }
 
+        printk!(Debug, "kern_cs_sel {:?}, user_cs_sel {:?}, user_ds_sel {:?}\n\r", 
+                kern_cs_sel, user_cs_sel, user_ds_sel);
         gdt
     });
 
@@ -144,6 +161,6 @@ pub fn test_idt() {
         printk!(Critical, "count: {}\r", count);
         count += 1;
 
-        busy_wait();
+        //busy_wait();
     }
 }

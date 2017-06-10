@@ -93,7 +93,7 @@ impl Mapper {
 
 
     pub fn map(&mut self, page: Page, flags: EntryFlags) {
-        let frame = alloc_frame().expect("not more free frame available");
+        let frame = alloc_frame().expect("no more free frame available");
         self.map_to(page, frame, flags)
     }
 

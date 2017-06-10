@@ -66,6 +66,24 @@ pub enum Descriptor {
 }
 
 impl Descriptor {
+    pub fn user_code_segment() -> Descriptor {
+        let flags = USER_SEGMENT | PRESENT | EXECUTABLE | LONG_MODE;
+        let mut bits = flags.bits();
+        bits.set_bit(41, true);
+        bits.set_bits(45..47, 0b11); //DPL = 3
+        Descriptor::UserSegment(bits)
+    }
+
+    pub fn user_data_segment() -> Descriptor {
+        let flags = USER_SEGMENT | PRESENT | LONG_MODE;
+        let mut bits = flags.bits();
+        //NOTE: amd64 says this is ignored in 64-bit submode, 
+        //but without it, iretq will generate GP
+        bits.set_bit(41, true);
+        bits.set_bits(45..47, 0b11); //DPL = 3
+        Descriptor::UserSegment(bits)
+    }
+
     pub fn kernel_code_segment() -> Descriptor {
         let flags = USER_SEGMENT | PRESENT | EXECUTABLE | LONG_MODE;
         Descriptor::UserSegment(flags.bits())
@@ -82,6 +100,7 @@ impl Descriptor {
         low.set_bits(0..16, (size_of::<TaskStateSegment>() - 1) as u64);
         // type (0b1001 = available 64-bit tss)
         low.set_bits(40..44, 0b1001);
+        //low.set_bits(45..47, 0b11); //DPL = 3
 
         let mut high = 0;
         high.set_bits(0..32, ptr.get_bits(32..64));

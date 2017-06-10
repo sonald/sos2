@@ -67,11 +67,11 @@ pub struct Entry {
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed)]
 pub struct ExceptionStackFrame {
-    rip: u64,
-    cs: u64,
-    rflags: u64,
-    old_rsp: u64,
-    odl_ss: u64
+    pub rip: u64,
+    pub cs: u64,
+    pub rflags: u64,
+    pub old_rsp: u64,
+    pub old_ss: u64
 }
 
 impl Entry {

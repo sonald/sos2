@@ -27,19 +27,29 @@ pub const PAGE_SIZE: usize = 4096;
 /// ffff800000000000 - ffff8007ffffffff (=32G) direct mapping of all phys. memory
 /// ffff800800000000 - ffff87ffffffffff (=43bits) reserved now
 /// ffff880000000000 - ffff8800ffffffff (=4G)  kernel mapping, from phys 0
+/// ffff880100000000 - ffff880101ffffff (=32M)  initial kernel heap
 #[allow(non_snake_case)]
 pub struct MemorySchema {
     pub UserMap: Range<usize>,
+    pub UserCode: Range<usize>,
+    pub UserStack: Range<usize>,
     pub Invalid: Range<usize>, // hardware hole
     pub PhysicalDirectMap: Range<usize>,
-    pub KernelMap: Range<usize>
+    pub KernelMap: Range<usize>,
+    pub KernelHeap: Range<usize>
 }
 
 pub const KERNEL_MAPPING: MemorySchema = MemorySchema {
-    UserMap: Range {start: 0, end: 0x7fff_ffffffff},
+    UserMap: Range {start: 0, end: 0x7fff_ff7fffff},
+
+    UserCode: Range {start: 0x04000000, end: 0x7fff_ff7fffff},
+    UserStack: Range {start: 0x7fff_ff800000, end: 0x7fff_ffffefff},
+
     Invalid: Range {start: 0x8000_00000000, end: 0xffff7fff_ffffffff},
     PhysicalDirectMap: Range {start: 0xffff8000_00000000, end: 0xffff8007_ffffffff},
+
     KernelMap: Range {start: 0xffff8800_00000000, end: 0xffff8800_ffffffff},
+    KernelHeap: Range {start: 0xffff8801_00000000, end: 0xffff8801_01ffffff},
 };
 
 #[allow(non_snake_case)]
@@ -81,30 +91,10 @@ pub fn init(mbinfo: &'static BootInformation) -> &'static Mutex<MemoryManager<'s
         test_paging_after_remap();
     }
 
-    {
-        //map kheap area
-        //TODO: should be lazily mapped after page fault sets up
-        let start_address = align_up(mbinfo.end_address(), PAGE_SIZE);
-        let alloc_size = 0x1000 * 1024;
-        kheap_allocator::HEAP_RANGE.call_once(|| {
-            Range {
-                start: start_address,
-                end: start_address + alloc_size
-            }
-        });
-
-        let mut active = ActivePML4Table::new();
-        let range = PageRange::new(start_address, start_address + alloc_size);
-        printk!(Info, "map heap [{:#x}, {:#x})\n\r", start_address, start_address + alloc_size);
-        for page in range {
-            active.map(page, WRITABLE);
-        }
-    }
-
     //after heap
     let stack_allocator = {
-        let start = Page::from_vaddress(align_up(mbinfo.end_address(), PAGE_SIZE) + 0x1000 * 1024);
-        let end = start + 1024;
+        let start = Page::from_vaddress(align_up(mbinfo.end_address(), PAGE_SIZE));
+        let end = start + 32;
 
         StackAllocator::new(start, end)
     };
@@ -126,7 +116,7 @@ fn test_frame_allocator() {
     while let Some(_) = frame::alloc_frame() {
         //printk!(Warn, "0x{:x}  ", f.number);
         i += 1;
-        if i == 400 { break }
+        if i == 100 { break }
     }
     printk!(Warn, "allocated #{} frames\n\r", i);
 }

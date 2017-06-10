@@ -250,7 +250,8 @@ impl<L> Table<L> where L: HierarchyTableLevel {
         -> &mut Table<L::NextLevel> {
         if self.next_level_table(index).is_none() {
             let frame = alloc_frame().expect("no more free frame available");
-            self.entries[index].set(frame, WRITABLE | PRESENT);
+            //FIXME: mark mid level tables as USER to make them accessable
+            self.entries[index].set(frame, WRITABLE | PRESENT | USER);
             self.next_level_table_mut(index).unwrap().zero()
         } else {
             self.next_level_table_mut(index).unwrap()
@@ -416,6 +417,37 @@ pub fn create_address_space(mbinfo: &BootInformation) -> InactivePML4Table {
             }
         }
 
+        {
+            //map kheap area to high end of physical area
+            use kheap_allocator;
+
+            //TODO: should be lazily mapped after page fault sets up
+            let start_address = KERNEL_MAPPING.KernelHeap.start;
+            let alloc_size = KERNEL_MAPPING.KernelHeap.end - KERNEL_MAPPING.KernelHeap.start + 1;
+            kheap_allocator::HEAP_RANGE.call_once(|| {
+                Range {
+                    start: start_address,
+                    end: start_address + alloc_size
+                }
+            });
+
+            //FIXME: so FrameAllocator should not override this region
+            let mut r = {
+                let mmap = mbinfo.memory_map_tag().unwrap();
+                let end = mmap.memory_areas().map(|a| a.base_addr + a.length).max().unwrap() as usize;
+                FrameRange::new(end - alloc_size, end)
+            };
+
+            let range = PageRange::new(start_address, start_address + alloc_size);
+
+            printk!(Info, "map heap [{:#x}, {:#x}) -> [{:#x}, {:#x})\n\r",
+                range.start.start_address(), range.end.start_address(),
+                r.start.start_address(), r.end.start_address());
+            for page in range {
+                let f = r.next().unwrap();
+                mapper.map_to(page, f, WRITABLE);
+            }
+        }
     });
 
     printk!(Info, "create_address_space {:?}\n\r", new_map);

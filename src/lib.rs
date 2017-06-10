@@ -138,9 +138,10 @@ pub extern fn kernel_main(mb2_header: usize) {
 
     if fb.frame_type == multiboot2::FramebufferType::Rgb {
         use kern::arch::cpu;
+        //NOTE: if I dont use console in timer, then there is no reason to disable IF here.
         let oflags = unsafe { cpu::push_flags() };
         let mut fb = Framebuffer::new(&fb);
-        if cfg!(feature = "test") { display(&mut fb); }
+        //if cfg!(feature = "test") { display(&mut fb); }
 
         {
             let mut term = con::tty1.lock();
@@ -149,9 +150,7 @@ pub extern fn kernel_main(mb2_header: usize) {
 
         con::clear();
         println!("framebuffer console init.\n\r");
-        if cfg!(feature = "test") { 
-            for b in 1..127u8 { print!("{}", b as char); }
-        }
+        //if cfg!(feature = "test") { for b in 1..127u8 { print!("{}", b as char); } }
         unsafe { cpu::pop_flags(oflags); }
     }
 

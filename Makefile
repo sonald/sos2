@@ -21,7 +21,7 @@ all: $(kernel) sos2.iso
 print-%: ; @echo $* = $($*)
 
 run: $(kernel) sos2.iso
-	$(QEMU) -cdrom sos2.iso -serial stdio -usb -vga vmware
+	$(QEMU) -cdrom sos2.iso -serial stdio -usb -vga vmware --no-reboot
 
 $(kernel): kern $(ldscript) $(kern_objs) $(rust_core)
 	@mkdir -p $(@D)

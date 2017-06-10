@@ -82,10 +82,14 @@ pub struct AreaFrameAllocator {
     areas: MemoryAreaIter,
     kernel: Range<Frame>,
     multiboot: Range<Frame>,
+    used: usize
 }
 
 impl FrameAllocator for AreaFrameAllocator {
     fn alloc_frame(&mut self) -> Option<Frame> {
+        use ::kern::console as con;
+        use con::LogLevel::*;
+
         let frame = self.next_free_frame;
 
         if self.current_area.is_some() {
@@ -98,6 +102,10 @@ impl FrameAllocator for AreaFrameAllocator {
                 self.next_free_frame = self.multiboot.end;
             } else {
                 self.next_free_frame += 1;
+                self.used += 1;
+                if self.used % 1000 == 0 {
+                    printk!(Debug, "frame usage: {}\n", self.used);
+                }
                 return Some(frame);
             }
 
@@ -120,7 +128,8 @@ impl AreaFrameAllocator {
             current_area: None,
             areas: areas,
             kernel: kernel,
-            multiboot: mb
+            multiboot: mb,
+            used: 0
         };
 
         afa.next_area();
@@ -218,6 +227,8 @@ pub fn init(mbinfo: &'static BootInformation) {
         start: Frame::from_paddress(mb_start),
         end: Frame::from_paddress(mb_end - 1) + 1,
     };
+    
+    //FIXME: exclude region used by kernel heap
     let afa = AreaFrameAllocator::new(mmap.memory_areas(), kr, mr);
     let mut guard = FRAME_ALLOCATOR.lock();
     *guard = Some(FrameAllocatorProxy::new(afa));

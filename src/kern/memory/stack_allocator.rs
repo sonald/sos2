@@ -4,14 +4,15 @@ use super::{PAGE_SIZE};
 #[macro_use] use kern::console as con;
 use con::LogLevel::*;
 
-#[derive(Debug, Clone, Copy)]
+// should not be copyable
+#[derive(Debug, Clone)]
 pub struct Stack {
     top: usize,
     bottom: usize,
 }
 
 impl Stack {
-    fn new(top: usize, bottom: usize) -> Stack {
+    pub fn new(top: usize, bottom: usize) -> Stack {
         assert!(top > bottom);
         Stack {
             top: top,

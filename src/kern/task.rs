@@ -1,15 +1,15 @@
-use ::kern::memory::inactive::InactivePML4Table;
+use ::kern::memory::inactive::{TemporaryPage, InactivePML4Table};
 use ::kern::memory::stack_allocator::{Stack, StackAllocator};
 use ::kern::memory::{MemoryManager, MM};
 use ::kern::memory::paging;
+use ::kern::memory::KERNEL_MAPPING;
 use ::kern::console::LogLevel::*;
 use ::kern::console::{Console, tty1};
 use ::kern::arch::cpu;
 
 use core::sync::atomic::{AtomicIsize, Ordering};
-use x86_64::instructions::interrupts;
 use collections::string::{String, ToString};
-use collections::BTreeMap;
+use collections::{BTreeMap, Vec};
 use alloc::arc::Arc;
 use core::ops::{Deref, DerefMut};
 
@@ -27,7 +27,7 @@ pub enum TaskState {
     Zombie
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Context {
     pub rflags: usize,
     pub cr3: usize, // phyiscal address
@@ -77,10 +77,22 @@ impl VirtualMemoryArea {
         }
     }
 
-    pub fn map(&mut self, mm: &mut MemoryManager) {
+    pub fn map(&self, inactive: &mut InactivePML4Table) {
+        let mut active = paging::ActivePML4Table::new();
+        let mut temp_page = TemporaryPage::new(paging::Page::from_vaddress(0xfffff_cafe_beef_000));
+        printk!(Debug, "mapping VirtualMemoryArea {:?} {:?}\n\r", self.get_pages(), self.flags);
+        active.with(inactive, &mut temp_page, |mapper| {
+            for page in self.get_pages() {
+                mapper.map(page, self.flags);
+            }
+        });
     }
 
-    pub fn unmap(&mut self, mm: &mut MemoryManager) {
+    pub fn unmap(&mut self, inactive: &mut InactivePML4Table) {
+    }
+
+    pub fn get_pages(&self) -> paging::PageRange {
+        paging::PageRange::new(self.start, self.start + self.size)
     }
 }
 
@@ -147,33 +159,119 @@ impl TaskList {
         self.get_task(CURRENT_ID.load(Ordering::SeqCst))
     }
 
-    pub fn alloc_task(&mut self, name: &str, parent: ProcId, rip: usize) {
+    pub fn alloc_kernel_task(&mut self, name: &str, rip: usize) {
         use core::mem::size_of;
 
-        let stack = {
-            let mut mm = MM.try().unwrap().lock();
-            mm.alloc_stack(2)
-        };
 
         let pid = self.next_id;
         assert!(self.next_id < MAX_TASK, "task id exceeds maximum boundary");
 
         let mut task = Task::empty();
         task.pid = pid as isize;
-        task.ppid = if pid > 1 {parent} else {0};
+        task.ppid = 0;
         task.name = Some(name.to_string());
         task.state = TaskState::Created;
-        task.kern_stack = stack;
+
+        task.kern_stack = Some({
+            let mem = vec![0u8; 8192].into_boxed_slice();
+            printk!(Debug, "boxed slice [{:#x}, {:#x})\n\r", mem.as_ptr() as usize, mem.len());
+            let top = mem.as_ptr() as usize;
+            Stack::new(top + mem.len(), top)
+        });
+        //FIXME: this is only for kernel threads
+        task.cr3 = Some({
+            let mut mm = MM.try().unwrap().lock();
+            mm.kernelPML4Table
+        });
         task.ctx = Context::new();
 
-        let kern_rsp = stack.as_ref().map(|st| st.top()).unwrap() - size_of::<usize>();
+        let kern_rsp = task.kern_stack.as_ref().map(|st| st.top()).unwrap() - size_of::<usize>();
         task.ctx.rflags = 0x0202;
         task.ctx.rsp = kern_rsp;
         unsafe {
             *(kern_rsp as *mut usize) = rip;
         }
+        task.ctx.cr3 = task.cr3.as_ref().unwrap().pml4_frame.start_address();
 
-        task.cr3 = None; //share with kernel
+        self.entry(pid).or_insert(Arc::new(RwLock::new(task)));
+        self.next_id += 1;
+    }
+
+    pub fn alloc_task(&mut self, name: &str, parent: ProcId, rip: usize) {
+        use core::mem::size_of;
+
+        let pid = self.next_id;
+        assert!(self.next_id < MAX_TASK, "task id exceeds maximum boundary");
+
+        let mut task = Task::empty();
+        task.pid = pid as isize;
+        task.ppid = parent; 
+        task.name = Some(name.to_string());
+        task.state = TaskState::Created;
+
+        task.cr3 = Some({
+            let mut mm = MM.try().unwrap().lock();
+            paging::create_address_space(mm.mbinfo)
+        });
+
+        task.user_stack = Some({
+            let mut vma = VirtualMemoryArea {
+                start: KERNEL_MAPPING.UserStack.start,
+                size: KERNEL_MAPPING.UserStack.end - KERNEL_MAPPING.UserStack.start + 1,
+                mapped: false,
+                flags: paging::USER | paging::WRITABLE | paging::NO_EXECUTE
+            };
+
+            vma.map(task.cr3.as_mut().unwrap());
+            vma.mapped = true;
+
+            vma
+        });
+
+        task.code = Some({
+            let mut vma = VirtualMemoryArea {
+                start: KERNEL_MAPPING.UserCode.start,
+                size: 0x1000, // should be size_of<Func>
+                mapped: false,
+                flags: paging::USER | paging::WRITABLE
+            };
+
+            vma.map(task.cr3.as_mut().unwrap());
+            vma.mapped = true;
+
+            vma
+        });
+
+        unsafe {
+            use core::ptr;
+            // switching pml4 is heavy
+            let cur_pml4 = paging::switch(task.cr3.clone().unwrap());
+
+            {
+                let vma = task.code.clone().unwrap();
+                let code = test_userlevel as usize;
+                ptr::copy_nonoverlapping(code as *mut u8,
+                                         vma.start as *mut u8, 0x100);
+            }
+
+            paging::switch(cur_pml4);
+        }
+
+        task.kern_stack = Some({
+            let mem = vec![0u8; 8192].into_boxed_slice();
+            printk!(Debug, "boxed slice [{:#x}, {:#x})\n\r", mem.as_ptr() as usize, mem.len());
+            let top = mem.as_ptr() as usize;
+            Stack::new(top + mem.len(), top)
+        });
+        task.ctx = Context::new();
+        let kern_rsp = task.kern_stack.as_ref().map(|st| st.top()).unwrap() - size_of::<usize>();
+        task.ctx.rflags = 0x0202;
+        task.ctx.rsp = kern_rsp;
+        unsafe { *(kern_rsp as *mut usize) = rip; }
+        
+        task.ctx.cr3 = task.cr3.as_ref().unwrap().pml4_frame.start_address();
+        printk!(Debug, "init cr3 {:?} {}\n\r", task.cr3, task.ctx.cr3);
+
         self.entry(pid).or_insert(Arc::new(RwLock::new(task)));
         self.next_id += 1;
     }
@@ -207,18 +305,16 @@ pub fn init() {
             idle as usize,
             test_thread as usize,
             test_thread2 as usize,
-            test_thread3 as usize
         ];
         let names = [
             &"idle",
             &"kthread1",
             &"kthread2",
-            &"kthread3",
         ];
 
         let mut tasks = TaskList::get_mut();
         for (id, &rip) in rips.iter().enumerate() {
-            tasks.alloc_task(names[id], 1, rip);
+            tasks.alloc_kernel_task(names[id], rip);
             //printk!(Info, "{:?}\n\r", task);
         }
 
@@ -227,23 +323,29 @@ pub fn init() {
 
 
     { 
+        use x86_64;
+
         let init: *mut Task;
-        let oflags = unsafe { cpu::push_flags() };
+        //let oflags = unsafe { cpu::push_flags() };
+        unsafe { x86_64::instructions::interrupts::disable(); }
+
+        {
+            let mut tasks = TaskList::get_mut();
+            tasks.alloc_task(&"init", 1, test_userlevel as usize);
+        }
 
         {
             let tasks = TaskList::get();
-            let task_lock = tasks.get_task(1).expect("task 1 does not exists");
+            let task_lock = tasks.get_task(4).expect("task 5");
             let mut task = task_lock.write();
+            CURRENT_ID.store(task.pid, Ordering::SeqCst);
             init = task.deref_mut() as *mut Task;
         }
 
-        let mut new_map = {
-            let mut mm = MM.try().unwrap().lock();
-            paging::create_address_space(mm.mbinfo)
-        };
 
-        unsafe { cpu::pop_flags(oflags); }
-        unsafe { start_tasking(&mut *init); }
+        printk!(Info, "start_tasking\n\r");
+        //unsafe { start_tasking(&mut *init); }
+        unsafe { ret_to_userspace(&mut *init); }
     }
 
     printk!(Info, "tasks done\n\r");
@@ -252,23 +354,6 @@ pub fn init() {
 pub fn idle() {
     loop {
         unsafe { asm!("hlt":::: "volatile"); }
-    }
-}
-
-pub fn test_thread3() {
-    let mut count = 0;
-    let busy_wait = || {
-        for _ in 1..30 {
-            unsafe { asm!("hlt":::: "volatile"); }
-        }
-    };
-
-    loop {
-        Console::with(&tty1, 22, 0, || {
-            printk!(Debug, "kernel thread 3: {}\n\r", count);
-        });
-        count += 1;
-        busy_wait();
     }
 }
 
@@ -306,6 +391,20 @@ pub fn test_thread() {
     }
 }
 
+#[naked]
+pub extern "C" fn test_userlevel() {
+    loop {}
+    //let mut count = 0;
+
+    //loop {
+        //count += 1;
+        //let mut i = 1;
+        //while i < 100000 {
+            //i += 1;
+        //}
+    //}
+}
+
 
 #[inline(never)]
 #[naked]
@@ -322,7 +421,6 @@ pub unsafe extern "C" fn switch_to(current: &mut Task, next: &mut Task) {
     asm!("movq %rsp, $0"   : "=r"(current.ctx.rsp) ::"memory": "volatile");
 
     // load context
-    asm!("pushq $0; popfq":: "r"(next.ctx.rflags) :"memory": "volatile");
     asm!("movq $0, %rbx"  :: "r"(next.ctx.rbx) :"memory": "volatile");
     asm!("movq $0, %r12"  :: "r"(next.ctx.r12) :"memory": "volatile");
     asm!("movq $0, %r13"  :: "r"(next.ctx.r13) :"memory": "volatile");
@@ -331,6 +429,8 @@ pub unsafe extern "C" fn switch_to(current: &mut Task, next: &mut Task) {
 
     asm!("movq $0, %rsp"  :: "r"(next.ctx.rsp) :"memory": "volatile");
     
+    //CAUTION: popfq causes IF enabled
+    asm!("pushq $0; popfq":: "r"(next.ctx.rflags) :"memory": "volatile");
     //NOTE: rbp is used by switch_to, to override rbp at the end
     asm!("movq $0, %rbp"  :: "r"(next.ctx.rbp) :"memory": "volatile");
 }
@@ -338,9 +438,7 @@ pub unsafe extern "C" fn switch_to(current: &mut Task, next: &mut Task) {
 #[inline(never)]
 #[naked]
 unsafe extern "C" fn start_tasking(next: &mut Task) {
-    printk!(Info, "start_tasking\n\r");
     // load context
-    asm!("pushq $0; popfq":: "r"(next.ctx.rflags) :"memory": "volatile");
     asm!("movq $0, %rbx"  :: "r"(next.ctx.rbx) :"memory": "volatile");
     asm!("movq $0, %r12"  :: "r"(next.ctx.r12) :"memory": "volatile");
     asm!("movq $0, %r13"  :: "r"(next.ctx.r13) :"memory": "volatile");
@@ -349,9 +447,51 @@ unsafe extern "C" fn start_tasking(next: &mut Task) {
 
     asm!("movq $0, %rsp"  :: "r"(next.ctx.rsp) :"memory": "volatile");
     
+    //CAUTION: popfq causes IF enabled
+    asm!("pushq $0; popfq":: "r"(next.ctx.rflags) :"memory": "volatile");
     //NOTE: rbp is used by switch_to, to override rbp at the end
     asm!("movq $0, %rbp"  :: "r"(next.ctx.rbp) :"memory": "volatile");
-    CURRENT_ID.store(1, Ordering::Release);
+}
+
+unsafe fn ret_to_userspace(init: &mut Task) -> ! {
+    use ::kern::interrupts::{self, idt};
+    use x86_64;
+
+    let frame = idt::ExceptionStackFrame {
+        rip: KERNEL_MAPPING.UserCode.start as u64, // init.code.as_ref().unwrap().start
+        cs: 16 | 3, // selector for user code segment, RPL = 3
+        rflags: init.ctx.rflags as u64,
+        old_rsp: (KERNEL_MAPPING.UserStack.end+1) as u64,
+        old_ss: 24 | 3,
+    };
+
+    interrupts::TSS.privilege_stack_table[0] = x86_64::VirtualAddress(init.ctx.rsp);
+    //printk!(Debug, "{:?} set TSS.rsp0\n", frame);
+
+    cpu::cr3_set(init.cr3.as_ref().unwrap().pml4_frame.start_address());
+
+    let p = unsafe {frame.rip as *mut u8};
+    for i in 0..20 {
+        printk!(Debug, "{:#x} ", *p.offset(i));
+    }
+
+    asm!("
+          pushq %rax
+          pushq %rbx
+          pushq %rcx
+          pushq %rdx
+          pushq %rsi
+          iretq"
+         :
+         : "{rax}"(frame.old_ss),
+           "{rbx}"(frame.old_rsp),
+           "{rcx}"(frame.rflags),
+           "{rdx}"(frame.cs),
+           "{rsi}"(frame.rip)
+           : "memory"
+           : "volatile");
+
+    ::core::intrinsics::unreachable()
 }
 
 pub unsafe fn sched() {
@@ -362,19 +502,27 @@ pub unsafe fn sched() {
     let id = CURRENT_ID.load(Ordering::SeqCst);
     if id == 0 { return  }
 
-    let tasks = TaskList::get();
-    let nid = if id + 1 > tasks.len() as ProcId { 1 } else { id + 1 };
-    CURRENT_ID.store(nid, Ordering::Release);
-    //printk!(Debug, "switch to {:?}\n", nid);
+    let nid;
     let current: *mut Task;
     let next: *mut Task;
 
     {
+        let tasks = TaskList::get();
+        nid = if id + 1 >= tasks.next_id as ProcId { 1 } else { id + 1 };
+        CURRENT_ID.store(nid, Ordering::Release);
+
         let current_lock = tasks.get_task(id as ProcId).expect("sched: get current task error");
         current = current_lock.write().deref_mut() as *mut Task;
+        assert!((*current).pid == id);
+
         let next_lock = tasks.get_task(nid as ProcId).expect("sched: get next task error");
         next = next_lock.write().deref_mut() as *mut Task;
+        assert!((*next).pid == nid);
+        //now tasklist lock released
     }
+
+    //printk!(Debug, "switch {} {:#x} to {} {:#x}\n", id, (&*current).ctx.rsp, nid, (&*next).ctx.rsp);
+    //printk!(Debug, "switch {:?} \n-> {:?}\n", (&*current).ctx, (&*next).ctx);
 
     switch_to(&mut *current, &mut *next); 
 }

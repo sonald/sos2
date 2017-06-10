@@ -53,11 +53,11 @@ pub extern "C" fn timer_handler(frame: &mut ExceptionStackFrame) {
     //printk!(Critical, "{}\n", TIMER_TICKS.load(Ordering::Acquire));
     
     let old = TIMER_TICKS.fetch_add(1, Ordering::SeqCst);
-    if (old + 1) % HZ as usize == 0 {
-        Console::with(&tty1, 0, 60, || {
-            printk!(Critical, "{}", TIMER_TICKS.load(Ordering::SeqCst));
-        });
-    }
+    //if (old + 1) % HZ as usize == 0 {
+        //Console::with(&tty1, 0, 60, || {
+            //printk!(Critical, "{}", TIMER_TICKS.load(Ordering::SeqCst));
+        //});
+    //}
 
     unsafe { sched(); }
 }
