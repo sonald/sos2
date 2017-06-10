@@ -79,7 +79,7 @@ pub fn enable_write_protect_bit() {
     unsafe { cr0_set(cr0() | CR0_WRITE_PROTECT) };
 }
 
-use x86_64::registers::flags;
+pub use x86_64::registers::flags;
 pub unsafe fn push_flags() -> flags::Flags {
     use x86_64::instructions::interrupts;
     let old = flags::flags();
@@ -90,7 +90,4 @@ pub unsafe fn push_flags() -> flags::Flags {
 pub unsafe fn pop_flags(old: flags::Flags) {
     use x86_64::instructions::interrupts;
     flags::set_flags(old);
-    if old.contains(flags::Flags::IF) {
-        interrupts::enable();
-    }
 }

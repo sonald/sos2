@@ -120,7 +120,9 @@ pub fn init(mm: &mut MemoryManager) {
         PIC_CHAIN.lock().enable(Irqs::IRQ2 as usize);
         PIC_CHAIN.lock().enable(Irqs::TIMER as usize);
         PIC_CHAIN.lock().enable(Irqs::KBD as usize);
-        //interrupts::enable();
+        let mut oflags = ::kern::arch::cpu::push_flags();
+        printk!(Debug, "oflags {:#?}\n\r", oflags);
+        interrupts::enable();
     }
 }
 

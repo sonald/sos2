@@ -50,11 +50,12 @@ pub extern "C" fn timer_handler(frame: &mut ExceptionStackFrame) {
     use ::kern::console::tty1;
 
     unsafe { PIC_CHAIN.lock().eoi(0); }
+    //printk!(Critical, "{}\n", TIMER_TICKS.load(Ordering::Acquire));
     
     let old = TIMER_TICKS.fetch_add(1, Ordering::SeqCst);
     if (old + 1) % HZ as usize == 0 {
         Console::with(&tty1, 0, 60, || {
-            printk!(Critical, "{}", TIMER_TICKS.load(Ordering::Acquire));
+            printk!(Critical, "{}", TIMER_TICKS.load(Ordering::SeqCst));
         });
     }
 

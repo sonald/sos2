@@ -137,6 +137,8 @@ pub extern fn kernel_main(mb2_header: usize) {
     }
 
     if fb.frame_type == multiboot2::FramebufferType::Rgb {
+        use kern::arch::cpu;
+        let oflags = unsafe { cpu::push_flags() };
         let mut fb = Framebuffer::new(&fb);
         if cfg!(feature = "test") { display(&mut fb); }
 
@@ -150,6 +152,7 @@ pub extern fn kernel_main(mb2_header: usize) {
         if cfg!(feature = "test") { 
             for b in 1..127u8 { print!("{}", b as char); }
         }
+        unsafe { cpu::pop_flags(oflags); }
     }
 
     task::init();

@@ -226,20 +226,21 @@ pub fn init() {
     }
 
 
-    CURRENT_ID.store(1, Ordering::Release);
     { 
         let init: *mut Task;
         let oflags = unsafe { cpu::push_flags() };
 
         {
             let tasks = TaskList::get();
-            let task_lock = tasks.current().expect("");
+            let task_lock = tasks.get_task(1).expect("task 1 does not exists");
             let mut task = task_lock.write();
             init = task.deref_mut() as *mut Task;
         }
 
-        let mut mm = MM.try().unwrap().lock();
-        let mut new_map = paging::create_address_space(mm.mbinfo);
+        let mut new_map = {
+            let mut mm = MM.try().unwrap().lock();
+            paging::create_address_space(mm.mbinfo)
+        };
 
         unsafe { cpu::pop_flags(oflags); }
         unsafe { start_tasking(&mut *init); }
@@ -350,10 +351,15 @@ unsafe extern "C" fn start_tasking(next: &mut Task) {
     
     //NOTE: rbp is used by switch_to, to override rbp at the end
     asm!("movq $0, %rbp"  :: "r"(next.ctx.rbp) :"memory": "volatile");
+    CURRENT_ID.store(1, Ordering::Release);
 }
 
 pub unsafe fn sched() {
-    let id = CURRENT_ID.load(Ordering::Acquire);
+    use ::kern::arch::cpu::flags;
+    let oflags = flags::flags();
+    assert!(!oflags.contains(flags::Flags::IF), "sched: should disable IF\n");
+
+    let id = CURRENT_ID.load(Ordering::SeqCst);
     if id == 0 { return  }
 
     let tasks = TaskList::get();
