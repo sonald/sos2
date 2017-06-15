@@ -84,6 +84,13 @@ impl Descriptor {
         Descriptor::UserSegment(bits)
     }
 
+    pub fn kernel_data_segment() -> Descriptor {
+        let flags = USER_SEGMENT | PRESENT | LONG_MODE;
+        let mut bits = flags.bits();
+        bits.set_bit(41, true);
+        Descriptor::UserSegment(bits)
+    }
+
     pub fn kernel_code_segment() -> Descriptor {
         let flags = USER_SEGMENT | PRESENT | EXECUTABLE | LONG_MODE;
         Descriptor::UserSegment(flags.bits())

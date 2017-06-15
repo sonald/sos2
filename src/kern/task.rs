@@ -56,6 +56,37 @@ impl Context {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct SyscallContext {
+    pub rip: usize,
+    pub rax: usize,
+    pub rdi: usize,
+    pub rsi: usize,
+    pub rdx: usize,
+    pub r8: usize,
+    pub r9: usize,
+    pub r10: usize,
+    pub rflags: usize,
+    pub rsp: usize,
+}
+
+impl SyscallContext {
+    pub const fn new() -> SyscallContext {
+        SyscallContext {
+            rip: 0, 
+            rax: 0, 
+            rdi: 0, 
+            rsi: 0, 
+            rdx: 0, 
+            r10: 0, 
+            r8: 0, 
+            r9: 0, 
+            rflags: 0,
+            rsp: 0
+        }
+    }
+}
+
 /// for task 
 #[derive(Debug, Clone)]
 pub struct VirtualMemoryArea {
@@ -107,6 +138,7 @@ pub struct Task {
     pub user_stack: Option<VirtualMemoryArea>,
     pub code: Option<VirtualMemoryArea>,
     pub ctx: Context,
+    pub sysctx: SyscallContext,
     pub state: TaskState
 }
 
@@ -121,7 +153,8 @@ impl Task {
             user_stack: None,
             code: None,
             state: TaskState::Unused,
-            ctx: Context::new()
+            ctx: Context::new(),
+            sysctx: SyscallContext::new()
         }
     }
 }
@@ -391,18 +424,40 @@ pub fn test_thread() {
     }
 }
 
-#[naked]
-pub extern "C" fn test_userlevel() {
-    loop {}
-    //let mut count = 0;
-
-    //loop {
-        //count += 1;
-        //let mut i = 1;
-        //while i < 100000 {
-            //i += 1;
-        //}
-    //}
+//#[naked]
+//pub extern "C" fn test_userlevel() {
+pub fn test_userlevel() {
+    let mut count: usize = 0;
+    loop {
+        count += 1;
+        unsafe { 
+            asm!("pushq %rbp
+                 pushq %rcx
+                 pushq %r11
+                 .byte 0x48
+                 syscall
+                 popq %r11
+                 popq %rcx
+                 popq %rbp"
+                 :
+                 :"{rax}"(count),
+                 "{rdi}"(1),
+                 "{rsi}"(2),
+                 "{rdx}"(3),
+                 "{r8}"(4),
+                 "{r9}"(5),
+                 "{r10}"(6)
+                 :"rcx", "r11"
+                 ); 
+        }
+        let mut i = 1;
+        while i < 1000 {
+            unsafe {
+                asm!("pause":::"memory":"volatile");
+            }
+            i += 1;
+        }
+    }
 }
 
 
@@ -455,14 +510,15 @@ unsafe extern "C" fn start_tasking(next: &mut Task) {
 
 unsafe fn ret_to_userspace(init: &mut Task) -> ! {
     use ::kern::interrupts::{self, idt};
+    use ::kern::syscall;
     use x86_64;
 
     let frame = idt::ExceptionStackFrame {
         rip: KERNEL_MAPPING.UserCode.start as u64, // init.code.as_ref().unwrap().start
-        cs: 16 | 3, // selector for user code segment, RPL = 3
+        cs: interrupts::USER_CS_SEL.0 as u64,
         rflags: init.ctx.rflags as u64,
         old_rsp: (KERNEL_MAPPING.UserStack.end+1) as u64,
-        old_ss: 24 | 3,
+        old_ss: interrupts::USER_DS_SEL.0 as u64,
     };
 
     interrupts::TSS.privilege_stack_table[0] = x86_64::VirtualAddress(init.ctx.rsp);
@@ -470,12 +526,23 @@ unsafe fn ret_to_userspace(init: &mut Task) -> ! {
 
     cpu::cr3_set(init.cr3.as_ref().unwrap().pml4_frame.start_address());
 
-    let p = unsafe {frame.rip as *mut u8};
-    for i in 0..20 {
-        printk!(Debug, "{:#x} ", *p.offset(i));
-    }
 
     asm!("
+         movq %rbx, %rbp
+         movq %rbx, %rsp
+         .byte 0x48
+         sysret"  //0x48 = REX.W, or we can just use sysretq
+         :
+         :"{r11}"(frame.rflags),
+          "{rcx}"(frame.rip),
+          "{rbx}"(frame.old_rsp)
+         :"memory"
+         :"volatile");
+
+    panic!("sysret wont go here");
+
+    // this is old way to return to userspace
+    asm!("movq %rbx, %rbp
           pushq %rax
           pushq %rbx
           pushq %rcx
@@ -488,8 +555,8 @@ unsafe fn ret_to_userspace(init: &mut Task) -> ! {
            "{rcx}"(frame.rflags),
            "{rdx}"(frame.cs),
            "{rsi}"(frame.rip)
-           : "memory"
-           : "volatile");
+         : "memory"
+         : "volatile");
 
     ::core::intrinsics::unreachable()
 }

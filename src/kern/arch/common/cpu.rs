@@ -1,4 +1,5 @@
 use kern::memory::paging::{VirtualAddress, PhysicalAddress};
+use x86_64::registers::msr;
 
 /// Invalidate the given address in the TLB using the `invlpg` instruction.
 pub fn tlb_flush(addr: VirtualAddress) {
@@ -45,32 +46,21 @@ pub unsafe fn cr0_set(val: usize) {
     asm!("mov $0, %cr0" :: "r" (val) : "memory");
 }
 
-pub const IA32_EFER: u32 = 0xc0000080;
-
-// Model specific registers
-
-/// Write 64 bits to msr register.
-pub unsafe fn wrmsr(msr: u32, value: u64) {
-    let low = value as u32;
-    let high = (value >> 32) as u32;
-    asm!("wrmsr" :: "{ecx}" (msr), "{eax}" (low), "{edx}" (high) : "memory" : "volatile" );
-}
-
-/// Read 64 bits msr register.
-pub fn rdmsr(msr: u32) -> u64 {
-    let (high, low): (u32, u32);
-    unsafe {
-        asm!("rdmsr" : "={eax}" (low), "={edx}" (high) : "{ecx}" (msr) : "memory" : "volatile");
-    }
-    ((high as u64) << 32) | (low as u64)
-}
-
 /// enable NXE bit, so page flag NO_EXECUTE is applicable
 pub fn enable_nxe_bit() {
     let nxe_bit = 1 << 11;
     unsafe {
-        let efer = rdmsr(IA32_EFER);
-        wrmsr(IA32_EFER, efer | nxe_bit);
+        let efer = msr::rdmsr(msr::IA32_EFER);
+        msr::wrmsr(msr::IA32_EFER, efer | nxe_bit);
+    }
+}
+
+// enable fast syscall
+pub fn enable_sce_bit() {
+    let sce_bit = 1 << 0;
+    unsafe {
+        let efer = msr::rdmsr(msr::IA32_EFER);
+        msr::wrmsr(msr::IA32_EFER, efer | sce_bit);
     }
 }
 

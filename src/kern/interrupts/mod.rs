@@ -11,7 +11,8 @@ use self::timer::{PIT, timer_handler};
 use ::kern::driver::keyboard::{KBD, keyboard_irq};
 use x86_64::structures::tss::TaskStateSegment;
 use x86_64::instructions::interrupts;
-use x86_64::instructions::segmentation::cs;
+use x86_64::structures::gdt::SegmentSelector;
+use x86_64::instructions::segmentation::*;
 use x86_64::registers::flags;
 
 use ::kern::console::LogLevel::*;
@@ -89,11 +90,16 @@ const IST_INDEX_DBL_FAULT: usize = 0;
 pub static mut TSS: TaskStateSegment = TaskStateSegment::new();
 static GDT: Once<GlobalDescriptorTable> = Once::new();
 
+pub const KERN_CS_SEL: SegmentSelector = SegmentSelector(1<<3);
+pub const KERN_DS_SEL: SegmentSelector = SegmentSelector(2<<3);
+pub const USER_DS_SEL: SegmentSelector = SegmentSelector((3<<3) | 3);
+pub const USER_CS_SEL: SegmentSelector = SegmentSelector((4<<3) | 3);
+pub const TSS_SEL: SegmentSelector = SegmentSelector(5<<3);
+
 pub fn init(mm: &mut MemoryManager) {
     use x86_64;
     use x86_64::instructions::tables::load_tss;
-    use x86_64::instructions::segmentation::set_cs;
-    use x86_64::structures::gdt::SegmentSelector;
+    use x86_64::registers::msr;
 
     {
         let dbl_fault_stack = mm.alloc_stack(1).expect("alloc double_fault stack failed\n\r");
@@ -103,28 +109,40 @@ pub fn init(mm: &mut MemoryManager) {
         }
     }
 
-    let mut kern_cs_sel = SegmentSelector(0);
     let mut tss_sel = SegmentSelector(0);
     let mut user_cs_sel = SegmentSelector(0);
     let gdt = GDT.call_once(|| {
         let mut gdt = GlobalDescriptorTable::new();
-        kern_cs_sel = gdt.add_entry(Descriptor::kernel_code_segment());
-        user_cs_sel = gdt.add_entry(Descriptor::user_code_segment());
-        let user_ds_sel = gdt.add_entry(Descriptor::user_data_segment());
+        gdt.add_entry(Descriptor::kernel_code_segment());
+        gdt.add_entry(Descriptor::kernel_data_segment());
+        gdt.add_entry(Descriptor::user_data_segment());
+        gdt.add_entry(Descriptor::user_code_segment());
         unsafe {
-            tss_sel = gdt.add_entry(Descriptor::tss_segment(&TSS));
+            gdt.add_entry(Descriptor::tss_segment(&TSS));
         }
-
-        printk!(Debug, "kern_cs_sel {:?}, user_cs_sel {:?}, user_ds_sel {:?}\n\r", 
-                kern_cs_sel, user_cs_sel, user_ds_sel);
         gdt
     });
 
     gdt.load();
 
+    // setup for fast syscalls (64-bit submode only)
     unsafe {
-        set_cs(kern_cs_sel);
-        load_tss(tss_sel);
+        use bit_field::BitField;
+        use ::kern::syscall;
+
+        let mut star_val: u64 = 0;
+        star_val.set_bits(32..48, KERN_CS_SEL.0 as u64); // offset to kern cs && ss
+        star_val.set_bits(48..64, KERN_DS_SEL.0 as u64); // offset to user cs & ss
+        msr::wrmsr(msr::IA32_STAR, star_val);
+        msr::wrmsr(msr::IA32_LSTAR, syscall::syscall_entry as u64);
+        msr::wrmsr(msr::IA32_FMASK, 0x0200); // disable interrupt right now
+        ::kern::arch::cpu::enable_sce_bit();
+    }
+
+    unsafe {
+        load_ds(KERN_DS_SEL);
+        set_cs(KERN_CS_SEL);
+        load_tss(TSS_SEL);
     }
 
     IDT.load();
