@@ -485,9 +485,17 @@ pub unsafe extern "C" fn switch_to(current: &mut Task, next: &mut Task) {
     asm!("movq $0, %rsp"  :: "r"(next.ctx.rsp) :"memory": "volatile");
     
     //CAUTION: popfq causes IF enabled
-    asm!("pushq $0; popfq":: "r"(next.ctx.rflags) :"memory": "volatile");
     //NOTE: rbp is used by switch_to, to override rbp at the end
-    asm!("movq $0, %rbp"  :: "r"(next.ctx.rbp) :"memory": "volatile");
+    asm!("
+         pushq $0
+         movq $1, %rbp
+         popfq
+         "
+         :
+         :"r"(next.ctx.rflags),
+          "r"(next.ctx.rbp)
+         :"memory"
+         :"volatile");
 }
 
 #[inline(never)]
