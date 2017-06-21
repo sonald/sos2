@@ -6,6 +6,7 @@ use ::kern::memory::KERNEL_MAPPING;
 use ::kern::console::LogLevel::*;
 use ::kern::console::{Console, tty1};
 use ::kern::arch::cpu;
+use ::kern::interrupts::{self, idt};
 
 use core::sync::atomic::{AtomicIsize, Ordering};
 use collections::string::{String, ToString};
@@ -211,18 +212,23 @@ impl TaskList {
             let top = mem.as_ptr() as usize;
             Stack::new(top + mem.len(), top)
         });
-        //FIXME: this is only for kernel threads
         task.cr3 = Some({
             let mut mm = MM.try().unwrap().lock();
             mm.kernelPML4Table
         });
         task.ctx = Context::new();
 
-        let kern_rsp = task.kern_stack.as_ref().map(|st| st.top()).unwrap() - size_of::<usize>();
+        let kern_rsp = task.kern_stack.as_ref().map(|st| st.top()).unwrap();
         task.ctx.rflags = 0x0202;
-        task.ctx.rsp = kern_rsp;
+        task.ctx.rsp = kern_rsp - size_of::<idt::ExceptionStackFrame>() - size_of::<usize>();
         unsafe {
-            *(kern_rsp as *mut usize) = rip;
+            let fp = kern_rsp as *mut usize;
+            *fp.offset(-1) = interrupts::KERN_DS_SEL.0 as usize;
+            *fp.offset(-2) = kern_rsp; // when task begins, exception frame will be overriden
+            *fp.offset(-3) = task.ctx.rflags;
+            *fp.offset(-4) = interrupts::KERN_CS_SEL.0 as usize;
+            *fp.offset(-5) = rip;
+            *fp.offset(-6) = start_task as usize;
         }
         task.ctx.cr3 = task.cr3.as_ref().unwrap().pml4_frame.start_address();
 
@@ -359,7 +365,6 @@ pub fn init() {
         use x86_64;
 
         let init: *mut Task;
-        //let oflags = unsafe { cpu::push_flags() };
         unsafe { x86_64::instructions::interrupts::disable(); }
 
         {
@@ -369,7 +374,7 @@ pub fn init() {
 
         {
             let tasks = TaskList::get();
-            let task_lock = tasks.get_task(4).expect("task 5");
+            let task_lock = tasks.get_task(4).expect("task 4");
             let mut task = task_lock.write();
             CURRENT_ID.store(task.pid, Ordering::SeqCst);
             init = task.deref_mut() as *mut Task;
@@ -377,7 +382,6 @@ pub fn init() {
 
 
         printk!(Info, "start_tasking\n\r");
-        //unsafe { start_tasking(&mut *init); }
         unsafe { ret_to_userspace(&mut *init); }
     }
 
@@ -516,6 +520,13 @@ unsafe extern "C" fn start_tasking(next: &mut Task) {
     asm!("movq $0, %rbp"  :: "r"(next.ctx.rbp) :"memory": "volatile");
 }
 
+#[inline(never)]
+#[naked]
+unsafe extern "C" fn start_task() -> ! {
+    asm!("iretq" ::: "memory" : "volatile");
+    ::core::intrinsics::unreachable()
+}
+
 unsafe fn ret_to_userspace(init: &mut Task) -> ! {
     use ::kern::interrupts::{self, idt};
     use ::kern::syscall;
@@ -579,26 +590,44 @@ pub unsafe fn sched() {
 
     let nid;
     let current: *mut Task;
-    let next: *mut Task;
+    let mut next: *mut Task = 0 as *mut Task;
 
     {
         let tasks = TaskList::get();
         nid = if id + 1 >= tasks.next_id as ProcId { 1 } else { id + 1 };
         CURRENT_ID.store(nid, Ordering::Release);
 
-        let current_lock = tasks.get_task(id as ProcId).expect("sched: get current task error");
-        current = current_lock.write().deref_mut() as *mut Task;
-        assert!((*current).pid == id);
+        assert_ne!(id, nid, "sched: id should not be equal to nid");
 
-        let next_lock = tasks.get_task(nid as ProcId).expect("sched: get next task error");
-        next = next_lock.write().deref_mut() as *mut Task;
-        assert!((*next).pid == nid);
+        {
+            let current_lock = tasks.get_task(id as ProcId).expect("sched: get current task error");
+            let mut guard = current_lock.try_read().expect("sched: current lock failed");
+            current = guard.deref() as *const Task as *mut Task;
+            assert!((*current).pid == id);
+        }
+
+        {
+            let next_lock = tasks.get_task(nid as ProcId).expect("sched: get next task error");
+            match next_lock.try_write() {
+                Some(mut guard) => {
+                    next = guard.deref_mut() as *mut Task;
+                    assert!((*next).pid == nid);
+                },
+                None => {
+                    printk!(Critical, "sched: next({}) lock failed\n\r", nid);
+                }
+            };
+        }
         //now tasklist lock released
     }
 
     //printk!(Debug, "switch {} {:#x} to {} {:#x}\n", id, (&*current).ctx.rsp, nid, (&*next).ctx.rsp);
     //printk!(Debug, "switch {:?} \n-> {:?}\n", (&*current).ctx, (&*next).ctx);
 
-    switch_to(&mut *current, &mut *next); 
+    //asm!("":::"memory":"volatile");
+
+    if next as usize != 0 {
+        switch_to(&mut *current, &mut *next); 
+    }
 }
 

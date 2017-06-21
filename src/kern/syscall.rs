@@ -1,7 +1,10 @@
 use ::kern::console::LogLevel::*;
 use ::kern::task;
+use ::kern::arch::cpu;
 use ::kern::console::{Console, tty1};
+
 use core::sync::atomic::Ordering;
+use x86_64::instructions::interrupts;
 
 /// args: rdi, rsi, rdx, r8, r9, r10
 /// rax is syscall number, and return value
@@ -49,9 +52,8 @@ pub unsafe fn syscall_entry() {
         };
     }
 
-    asm!("movq $0, %rsp"::"r"(kern_rsp)::"volatile");
+    asm!("movq $0, %rsp"::"r"(kern_rsp):"memory":"volatile");
 
-    use x86_64::instructions::interrupts;
 
     interrupts::enable();
     sys_write();
@@ -111,6 +113,70 @@ pub unsafe fn _syscall_return()
          "{r10}"(r10)
          :"memory"
          :"volatile");
+}
+
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub enum Syscall {
+    NONE          =   0,
+    FORK          =   1,
+    EXIT          =   2,
+    WAIT          =   3,
+    PIPE          =   4,
+    READ          =   5,
+    KILL          =   6,
+    EXEC          =   7,
+    FSTAT         =   8,
+    CHDIR         =   9,
+    DUP           =  10,
+    GETPID        =  11,
+    SBRK          =  12,
+    SLEEP         =  13,
+    UPTIME        =  14,
+    OPEN          =  15,
+    WRITE         =  16,
+    MKNOD         =  17,
+    UNLINK        =  18,
+    LINK          =  19,
+    MKDIR         =  20,
+    CLOSE         =  21,
+    MOUNT         =  22,
+    UMOUNT        =  23,
+    GETPPID       =  24,
+    MMAP          =  25,
+    READDIR       =  26,
+    DUP2          =  27,
+    KDUMP         =  28,
+    LSEEK         =  29,
+    STAT          =  30,
+    LSTAT         =  31,
+    SIGNAL        =  32,
+    SIGACTION     =  33,
+    SIGPENDING    =  34,
+    SIGPROCMASK   =  35,
+    SIGSUSPEND    =  36,
+    SIGRETURN     =  37,
+    WAITPID       =  38,
+    FCHDIR        =  39,
+    GETCWD        =  40,
+
+    NR_SYSCALL    =  41
+}
+
+//pub struct SyscallInfo {
+    //nr: Syscall,
+
+//}
+
+//static SYSCALLS: [Syscall; NR_SYSCALL];
+
+pub fn init()
+{
+    
+}
+
+pub fn sys_dispatch() 
+{
 }
 
 pub fn sys_write() {
