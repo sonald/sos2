@@ -11,3 +11,6 @@ pub mod memory;
 pub mod interrupts;
 pub mod task;
 pub mod syscall;
+
+
+pub use self::syscall::syscall_dispatch;

@@ -11,7 +11,7 @@ target := $(arch)-sos2
 ldscript := src/kern/kernel.lds
 QEMU := qemu-system-x86_64 
 kernel := build/kernel
-kern_srcs := $(wildcard src/kern/arch/$(arch)/boot/*.asm)
+kern_srcs := $(wildcard src/kern/arch/$(arch)/boot/*.asm src/kern/arch/$(arch)/*.asm)
 kern_objs := $(patsubst %.asm, build/%.o, $(kern_srcs))
 rust_core := target/$(target)/debug/libsos2.a
 

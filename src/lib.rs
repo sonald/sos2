@@ -26,6 +26,8 @@ extern crate bit_field;
 #[macro_use] extern crate lazy_static;
 
 #[macro_use] mod kern;
+// make syscall_dispatch exported
+pub use kern::syscall_dispatch;
 
 use kern::console as con;
 use con::Console;
@@ -36,6 +38,7 @@ use kern::interrupts;
 use kheap_allocator as kheap;
 use kern::driver::video::{Framebuffer, Point, Rgba};
 use kern::task;
+use kern::syscall;
 
 #[allow(dead_code)]
 fn busy_wait () {

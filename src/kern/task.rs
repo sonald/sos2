@@ -28,6 +28,8 @@ pub enum TaskState {
     Zombie
 }
 
+
+/// context for kernel side task scheduler
 #[derive(Debug, Clone)]
 pub struct Context {
     pub rflags: usize,
@@ -53,37 +55,6 @@ impl Context {
             r13: 0, 
             r14: 0, 
             r15: 0, 
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct SyscallContext {
-    pub rip: usize,
-    pub rax: usize,
-    pub rdi: usize,
-    pub rsi: usize,
-    pub rdx: usize,
-    pub r8: usize,
-    pub r9: usize,
-    pub r10: usize,
-    pub rflags: usize,
-    pub rsp: usize,
-}
-
-impl SyscallContext {
-    pub const fn new() -> SyscallContext {
-        SyscallContext {
-            rip: 0, 
-            rax: 0, 
-            rdi: 0, 
-            rsi: 0, 
-            rdx: 0, 
-            r10: 0, 
-            r8: 0, 
-            r9: 0, 
-            rflags: 0,
-            rsp: 0
         }
     }
 }
@@ -128,6 +99,29 @@ impl VirtualMemoryArea {
     }
 }
 
+#[derive(Debug, Clone)]
+#[repr(C, packed)]
+pub struct TLSSegment {
+    pub user_rsp: usize,
+    pub kern_rsp: usize
+}
+
+impl TLSSegment {
+    pub const fn empty() -> TLSSegment {
+        TLSSegment {
+            user_rsp: 0,
+            kern_rsp: 0
+        }
+    }
+
+    pub const fn new(kern_rsp: usize, user_rsp: usize) -> TLSSegment {
+        TLSSegment {
+            user_rsp,
+            kern_rsp
+        }
+    }
+}
+
 
 #[derive(Debug, Clone)]
 pub struct Task {
@@ -139,8 +133,7 @@ pub struct Task {
     pub user_stack: Option<VirtualMemoryArea>,
     pub code: Option<VirtualMemoryArea>,
     pub ctx: Context,
-    pub sysctx: SyscallContext,
-    pub state: TaskState
+    pub state: TaskState,
 }
 
 impl Task {
@@ -155,7 +148,6 @@ impl Task {
             code: None,
             state: TaskState::Unused,
             ctx: Context::new(),
-            sysctx: SyscallContext::new()
         }
     }
 }
@@ -193,6 +185,7 @@ impl TaskList {
         self.get_task(CURRENT_ID.load(Ordering::SeqCst))
     }
 
+    // kernel thread
     pub fn alloc_kernel_task(&mut self, name: &str, rip: usize) {
         use core::mem::size_of;
 
@@ -220,11 +213,19 @@ impl TaskList {
 
         let kern_rsp = task.kern_stack.as_ref().map(|st| st.top()).unwrap();
         task.ctx.rflags = 0x0202;
-        task.ctx.rsp = kern_rsp - size_of::<idt::ExceptionStackFrame>() - size_of::<usize>();
+        task.ctx.rsp = kern_rsp - size_of::<TLSSegment>() 
+            - size_of::<idt::ExceptionStackFrame>() - size_of::<usize>();
         unsafe {
-            let fp = kern_rsp as *mut usize;
+            let tlsbase = kern_rsp - size_of::<TLSSegment>();
+            let tls = tlsbase as *mut TLSSegment;
+            ::core::ptr::write(tls, TLSSegment {
+                user_rsp: 0,
+                kern_rsp: tlsbase
+            });
+
+            let fp = tlsbase as *mut usize;
             *fp.offset(-1) = interrupts::KERN_DS_SEL.0 as usize;
-            *fp.offset(-2) = kern_rsp; // when task begins, exception frame will be overriden
+            *fp.offset(-2) = tlsbase; // when task begins, exception frame will be overriden
             *fp.offset(-3) = task.ctx.rflags;
             *fp.offset(-4) = interrupts::KERN_CS_SEL.0 as usize;
             *fp.offset(-5) = rip;
@@ -236,6 +237,7 @@ impl TaskList {
         self.next_id += 1;
     }
 
+    // user task
     pub fn alloc_task(&mut self, name: &str, parent: ProcId, rip: usize) {
         use core::mem::size_of;
 
@@ -288,9 +290,8 @@ impl TaskList {
 
             {
                 let vma = task.code.clone().unwrap();
-                let code = test_userlevel as usize;
-                ptr::copy_nonoverlapping(code as *mut u8,
-                                         vma.start as *mut u8, 0x100);
+                ptr::copy_nonoverlapping(rip as *mut u8,
+                                         vma.start as *mut u8, 0x1000);
             }
 
             paging::switch(cur_pml4);
@@ -303,10 +304,17 @@ impl TaskList {
             Stack::new(top + mem.len(), top)
         });
         task.ctx = Context::new();
-        let kern_rsp = task.kern_stack.as_ref().map(|st| st.top()).unwrap() - size_of::<usize>();
+        let kern_rsp = task.kern_stack.as_ref().map(|st| st.top()).unwrap();
         task.ctx.rflags = 0x0202;
-        task.ctx.rsp = kern_rsp;
-        unsafe { *(kern_rsp as *mut usize) = rip; }
+        task.ctx.rsp = kern_rsp - size_of::<TLSSegment>();
+        unsafe { 
+            let mut tlsbase = kern_rsp - size_of::<TLSSegment>();
+            let tls = tlsbase as *mut TLSSegment;
+            ::core::ptr::write(tls, TLSSegment {
+                user_rsp: (KERNEL_MAPPING.UserStack.end+1),
+                kern_rsp: tlsbase
+            });
+        }
         
         task.ctx.cr3 = task.cr3.as_ref().unwrap().pml4_frame.start_address();
         printk!(Debug, "init cr3 {:?} {}\n\r", task.cr3, task.ctx.cr3);
@@ -428,34 +436,43 @@ pub fn test_thread() {
     }
 }
 
-//#[naked]
-//pub extern "C" fn test_userlevel() {
 pub fn test_userlevel() {
-    let mut count: usize = 0;
+    let mut a0 = 1;
+    let mut a1 = 2;
+    let mut a2 = 3;
+    let mut a3 = 4;
+    let mut a4 = 5;
+    let mut a5 = 6;
+
     loop {
-        count += 1;
-        unsafe { 
-            asm!("pushq %rbp
-                 pushq %rcx
-                 pushq %r11
-                 .byte 0x48
+        unsafe {
+            asm!("
+                pushq %rcx
+                pushq %r11
                  syscall
                  popq %r11
-                 popq %rcx
-                 popq %rbp"
+                 popq %rcx"
                  :
-                 :"{rax}"(count),
-                 "{rdi}"(1),
-                 "{rsi}"(2),
-                 "{rdx}"(3),
-                 "{r8}"(4),
-                 "{r9}"(5),
-                 "{r10}"(6)
+                 :"{rax}"(16), // write is 16
+                 "{rdi}"(a0),
+                 "{rsi}"(a1),
+                 "{rdx}"(a2),
+                 "{r8}"(a3),
+                 "{r9}"(a4),
+                 "{r10}"(a5)
                  :"rcx", "r11"
+                 :"volatile"
                  ); 
         }
+        a0 += 1;
+        a1 += 1;
+        a2 += 1;
+        a3 += 1;
+        a4 += 1;
+        a5 += 1;
+
         let mut i = 1;
-        while i < 1000 {
+        while i < 10000 {
             unsafe {
                 asm!("pause":::"memory":"volatile");
             }
@@ -504,24 +521,6 @@ pub unsafe extern "C" fn switch_to(current: &mut Task, next: &mut Task) {
 
 #[inline(never)]
 #[naked]
-unsafe extern "C" fn start_tasking(next: &mut Task) {
-    // load context
-    asm!("movq $0, %rbx"  :: "r"(next.ctx.rbx) :"memory": "volatile");
-    asm!("movq $0, %r12"  :: "r"(next.ctx.r12) :"memory": "volatile");
-    asm!("movq $0, %r13"  :: "r"(next.ctx.r13) :"memory": "volatile");
-    asm!("movq $0, %r14"  :: "r"(next.ctx.r14) :"memory": "volatile");
-    asm!("movq $0, %r15"  :: "r"(next.ctx.r15) :"memory": "volatile");
-
-    asm!("movq $0, %rsp"  :: "r"(next.ctx.rsp) :"memory": "volatile");
-    
-    //CAUTION: popfq causes IF enabled
-    asm!("pushq $0; popfq":: "r"(next.ctx.rflags) :"memory": "volatile");
-    //NOTE: rbp is used by switch_to, to override rbp at the end
-    asm!("movq $0, %rbp"  :: "r"(next.ctx.rbp) :"memory": "volatile");
-}
-
-#[inline(never)]
-#[naked]
 unsafe extern "C" fn start_task() -> ! {
     asm!("iretq" ::: "memory" : "volatile");
     ::core::intrinsics::unreachable()
@@ -543,10 +542,22 @@ unsafe fn ret_to_userspace(init: &mut Task) -> ! {
     interrupts::TSS.privilege_stack_table[0] = x86_64::VirtualAddress(init.ctx.rsp);
     //printk!(Debug, "{:?} set TSS.rsp0\n", frame);
 
+    {
+        use x86_64::registers::msr;
+
+        let tlsbase = init.kern_stack.as_ref().map(|st| st.top()).unwrap()
+            - ::core::mem::size_of::<TLSSegment>();
+        let tls = &*(tlsbase as *const TLSSegment);
+        if tls.kern_rsp != 0 {
+            msr::wrmsr(msr::IA32_GS_BASE, tls.kern_rsp as u64);
+        }
+    }
+
     cpu::cr3_set(init.cr3.as_ref().unwrap().pml4_frame.start_address());
 
 
     asm!("
+         swapgs
          movq %rbx, %rbp
          movq %rbx, %rsp
          .byte 0x48
@@ -559,24 +570,6 @@ unsafe fn ret_to_userspace(init: &mut Task) -> ! {
          :"volatile");
 
     panic!("sysret wont go here");
-
-    // this is old way to return to userspace
-    asm!("movq %rbx, %rbp
-          pushq %rax
-          pushq %rbx
-          pushq %rcx
-          pushq %rdx
-          pushq %rsi
-          iretq"
-         :
-         : "{rax}"(frame.old_ss),
-           "{rbx}"(frame.old_rsp),
-           "{rcx}"(frame.rflags),
-           "{rdx}"(frame.cs),
-           "{rsi}"(frame.rip)
-         : "memory"
-         : "volatile");
-
     ::core::intrinsics::unreachable()
 }
 
@@ -624,9 +617,12 @@ pub unsafe fn sched() {
     //printk!(Debug, "switch {} {:#x} to {} {:#x}\n", id, (&*current).ctx.rsp, nid, (&*next).ctx.rsp);
     //printk!(Debug, "switch {:?} \n-> {:?}\n", (&*current).ctx, (&*next).ctx);
 
-    //asm!("":::"memory":"volatile");
-
+    //TODO: if next is another user task, gs base should be set accordingly
+    
     if next as usize != 0 {
+        if (*current).ctx.cr3 != (*next).ctx.cr3 {
+            cpu::cr3_set((*next).cr3.as_ref().unwrap().pml4_frame.start_address());
+        }
         switch_to(&mut *current, &mut *next); 
     }
 }

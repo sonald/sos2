@@ -128,19 +128,20 @@ pub fn init(mm: &mut MemoryManager) {
     // setup for fast syscalls (64-bit submode only)
     unsafe {
         use bit_field::BitField;
-        use ::kern::syscall;
+        extern { fn syscall_entry(); }
 
         let mut star_val: u64 = 0;
         star_val.set_bits(32..48, KERN_CS_SEL.0 as u64); // offset to kern cs && ss
         star_val.set_bits(48..64, KERN_DS_SEL.0 as u64); // offset to user cs & ss
         msr::wrmsr(msr::IA32_STAR, star_val);
-        msr::wrmsr(msr::IA32_LSTAR, syscall::syscall_entry as u64);
+        msr::wrmsr(msr::IA32_LSTAR, syscall_entry as u64);
         msr::wrmsr(msr::IA32_FMASK, 0x0200); // disable interrupt right now
         ::kern::arch::cpu::enable_sce_bit();
     }
 
     unsafe {
         load_ds(KERN_DS_SEL);
+        load_gs(KERN_DS_SEL);
         set_cs(KERN_CS_SEL);
         load_tss(TSS_SEL);
     }
