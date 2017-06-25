@@ -87,6 +87,7 @@ pub fn init()
 }
 
 pub fn sys_write(fd: isize, buf: &[u8]) {
-    Console::with(&tty1, 18, 0, || { printk!(Debug, "sys_write\n\r"); });
+    let msg = ::core::str::from_utf8(buf).unwrap();
+    Console::with(&tty1, 18, 0, || { printk!(Debug, "sys_write {}\n\r", msg); });
 }
 

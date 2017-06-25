@@ -443,6 +443,7 @@ pub fn test_userlevel() {
     let mut a3 = 4;
     let mut a4 = 5;
     let mut a5 = 6;
+    let buf = [b'u', b's', b'e', b'r', b's', b'p', b'a', b'c', b'e'];
 
     loop {
         unsafe {
@@ -455,8 +456,8 @@ pub fn test_userlevel() {
                  :
                  :"{rax}"(16), // write is 16
                  "{rdi}"(a0),
-                 "{rsi}"(a1),
-                 "{rdx}"(a2),
+                 "{rsi}"(&buf as *const _ as usize),
+                 "{rdx}"(9),
                  "{r8}"(a3),
                  "{r9}"(a4),
                  "{r10}"(a5)
