@@ -6,11 +6,17 @@ else
 	LD = ld
 	GRUB_MKRESCUE = grub-mkrescue
 endif
+ROOT = $(shell pwd)
+
 arch ?= x86_64
 target := $(arch)-sos2
+user_target := $(arch)-sos2-user
 ldscript := src/kern/kernel.lds
 QEMU := qemu-system-x86_64 
+
+
 kernel := build/kernel
+init := usermode/init/target/$(user_target)/debug/init
 kern_srcs := $(wildcard src/kern/arch/$(arch)/boot/*.asm src/kern/arch/$(arch)/*.asm)
 kern_objs := $(patsubst %.asm, build/%.o, $(kern_srcs))
 rust_core := target/$(target)/debug/libsos2.a
@@ -37,9 +43,13 @@ kern:
 check:
 	xargo check --target=$(target) --features "test kdebug"
 
+init:
+	cd usermode/init && xargo build --target=$(user_target)
+	#RUST_TARGET_PATH=$(ROOT)/usermode/init xargo build --target $(user_target) --manifest-path usermode/init/Cargo.toml
 
-sos2.iso: $(kernel) 
+sos2.iso: $(kernel) init
 	@mkdir -p isofiles/boot/grub
 	@cp grub.cfg isofiles/boot/grub
 	@cp $(kernel) isofiles/
+	@cp $(init) isofiles/
 	@$(GRUB_MKRESCUE) -o $@ isofiles

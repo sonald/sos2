@@ -36,7 +36,8 @@ pub struct MemorySchema {
     pub Invalid: Range<usize>, // hardware hole
     pub PhysicalDirectMap: Range<usize>,
     pub KernelMap: Range<usize>,
-    pub KernelHeap: Range<usize>
+    pub KernelHeap: Range<usize>,
+    pub KernelStack: Range<usize>, // reserved for stack allocator
 }
 
 pub const KERNEL_MAPPING: MemorySchema = MemorySchema {
@@ -49,7 +50,8 @@ pub const KERNEL_MAPPING: MemorySchema = MemorySchema {
     PhysicalDirectMap: Range {start: 0xffff8000_00000000, end: 0xffff8007_ffffffff},
 
     KernelMap: Range {start: 0xffff8800_00000000, end: 0xffff8800_ffffffff},
-    KernelHeap: Range {start: 0xffff8801_00000000, end: 0xffff8801_01ffffff},
+    KernelHeap: Range {start: 0xffff8801_00000000, end: 0xffff8801_01ffffff},  // 32MB
+    KernelStack: Range {start: 0xffff8802_00000000, end: 0xffff8802_07ffffff}, // 128MB
 };
 
 #[allow(non_snake_case)]
@@ -93,8 +95,8 @@ pub fn init(mbinfo: &'static BootInformation) -> &'static Mutex<MemoryManager<'s
 
     //after heap
     let stack_allocator = {
-        let start = Page::from_vaddress(align_up(mbinfo.end_address(), PAGE_SIZE));
-        let end = start + 32;
+        let start = Page::from_vaddress(KERNEL_MAPPING.KernelStack.start);
+        let end = Page::from_vaddress(KERNEL_MAPPING.KernelStack.end);
 
         StackAllocator::new(start, end)
     };

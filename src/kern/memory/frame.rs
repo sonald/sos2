@@ -199,33 +199,47 @@ pub fn init(mbinfo: &'static BootInformation) {
 
     let kernel_base = KERNEL_MAPPING.KernelMap.start;
     let mmap = mbinfo.memory_map_tag().expect("memory map is unavailable");
-    let start = mmap.memory_areas().map(|a| a.base_addr).min().unwrap();
-    let end = mmap.memory_areas().map(|a| a.base_addr + a.length).max().unwrap();
-    printk!(Info, "mmap start: {:#x}, end: {:#x}\n\r", start ,end);
-
-    let elf = mbinfo.elf_sections_tag().expect("elf sections is unavailable");
-    let mut kernel_start = elf.sections().filter(|a| a.is_allocated()).map(|a| a.addr).min().unwrap() as usize;
-    let mut kernel_end = elf.sections().filter(|a| a.is_allocated()).map(|a| a.addr + a.size).max().unwrap() as usize;
-
-    if kernel_start > kernel_base {
-        kernel_start -= kernel_base;
+    {
+        let start = mmap.memory_areas().map(|a| a.base_addr).min().unwrap();
+        let end = mmap.memory_areas().map(|a| a.base_addr + a.length).max().unwrap();
+        printk!(Info, "mmap start: {:#x}, end: {:#x}\n\r", start ,end);
     }
-    if kernel_end > kernel_base {
-        kernel_end -= kernel_base;
-    }
-    printk!(Info, "kernel start: {:#x}, end: {:#x}\n\r", kernel_start, kernel_end);
 
-    let (mb_start, mb_end) = (mbinfo.start_address() - kernel_base,
-    mbinfo.end_address() - kernel_base);
-    printk!(Info, "mboot2 start: {:#x}, end: {:#x}\n\r", mb_start, mb_end);
 
-    let kr = Range {
-        start: Frame::from_paddress(kernel_start),
-        end: Frame::from_paddress(kernel_end - 1) + 1,
+    let kr = {
+        let elf = mbinfo.elf_sections_tag().expect("elf sections is unavailable");
+        let mut kernel_start = elf.sections().filter(|a| a.is_allocated()).map(|a| a.addr).min().unwrap() as usize;
+        let mut kernel_end = elf.sections().filter(|a| a.is_allocated()).map(|a| a.addr + a.size).max().unwrap() as usize;
+
+        if kernel_start > kernel_base {
+            kernel_start -= kernel_base;
+        }
+        if kernel_end > kernel_base {
+            kernel_end -= kernel_base;
+        }
+        printk!(Info, "kernel start: {:#x}, end: {:#x}\n\r", kernel_start, kernel_end);
+
+        Range {
+            start: Frame::from_paddress(kernel_start),
+            end: Frame::from_paddress(kernel_end - 1) + 1,
+        }
     };
-    let mr = Range {
-        start: Frame::from_paddress(mb_start),
-        end: Frame::from_paddress(mb_end - 1) + 1,
+    let mr = {
+        use ::core::cmp::{min, max};
+
+        let mods_start = mbinfo.module_tags().map(|a| a.start_address()).min().unwrap() as usize;
+        let mods_end = mbinfo.module_tags().map(|a| a.end_address()).max().unwrap() as usize;
+
+        let (mb_start, mb_end) = (
+            min(mods_start, mbinfo.start_address() - kernel_base),
+            max(mods_end, mbinfo.end_address() - kernel_base)
+            );
+        printk!(Info, "mboot2(include modules) start: {:#x}, end: {:#x}\n\r", mb_start, mb_end);
+
+        Range {
+            start: Frame::from_paddress(mb_start),
+            end: Frame::from_paddress(mb_end - 1) + 1,
+        }
     };
     
     //FIXME: exclude region used by kernel heap

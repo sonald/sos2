@@ -1,8 +1,7 @@
 use ::kern::memory::inactive::{TemporaryPage, InactivePML4Table};
 use ::kern::memory::stack_allocator::{Stack, StackAllocator};
-use ::kern::memory::{MemoryManager, MM};
+use ::kern::memory::{MemoryManager, MM, KERNEL_MAPPING};
 use ::kern::memory::paging;
-use ::kern::memory::KERNEL_MAPPING;
 use ::kern::console::LogLevel::*;
 use ::kern::console::{Console, tty1};
 use ::kern::arch::cpu;
@@ -15,6 +14,7 @@ use alloc::arc::Arc;
 use core::ops::{Deref, DerefMut};
 
 use spin::*;
+use ::kern::elf64::*;
 
 pub type ProcId = isize;
 
@@ -132,6 +132,8 @@ pub struct Task {
     pub kern_stack: Option<Stack>,
     pub user_stack: Option<VirtualMemoryArea>,
     pub code: Option<VirtualMemoryArea>,
+    pub data: Option<VirtualMemoryArea>, //including data and bss
+    pub exec_entry: usize,
     pub ctx: Context,
     pub state: TaskState,
 }
@@ -146,6 +148,8 @@ impl Task {
             kern_stack: None,
             user_stack: None,
             code: None,
+            data: None,
+            exec_entry: 0,
             state: TaskState::Unused,
             ctx: Context::new(),
         }
@@ -198,6 +202,7 @@ impl TaskList {
         task.ppid = 0;
         task.name = Some(name.to_string());
         task.state = TaskState::Created;
+        task.exec_entry = rip;
 
         task.kern_stack = Some({
             let mem = vec![0u8; 8192].into_boxed_slice();
@@ -228,7 +233,7 @@ impl TaskList {
             *fp.offset(-2) = tlsbase; // when task begins, exception frame will be overriden
             *fp.offset(-3) = task.ctx.rflags;
             *fp.offset(-4) = interrupts::KERN_CS_SEL.0 as usize;
-            *fp.offset(-5) = rip;
+            *fp.offset(-5) = task.exec_entry;
             *fp.offset(-6) = start_task as usize;
         }
         task.ctx.cr3 = task.cr3.as_ref().unwrap().pml4_frame.start_address();
@@ -249,6 +254,7 @@ impl TaskList {
         task.ppid = parent; 
         task.name = Some(name.to_string());
         task.state = TaskState::Created;
+        task.exec_entry = rip;
 
         task.cr3 = Some({
             let mut mm = MM.try().unwrap().lock();
@@ -290,12 +296,131 @@ impl TaskList {
 
             {
                 let vma = task.code.clone().unwrap();
-                ptr::copy_nonoverlapping(rip as *mut u8,
+                ptr::copy_nonoverlapping(task.exec_entry as *mut u8,
                                          vma.start as *mut u8, 0x1000);
             }
 
             paging::switch(cur_pml4);
         }
+
+        task.kern_stack = Some({
+            let mem = vec![0u8; 8192].into_boxed_slice();
+            printk!(Debug, "boxed slice [{:#x}, {:#x})\n\r", mem.as_ptr() as usize, mem.len());
+            let top = mem.as_ptr() as usize;
+            Stack::new(top + mem.len(), top)
+        });
+        task.ctx = Context::new();
+        let kern_rsp = task.kern_stack.as_ref().map(|st| st.top()).unwrap();
+        task.ctx.rflags = 0x0202;
+        task.ctx.rsp = kern_rsp - size_of::<TLSSegment>();
+        unsafe { 
+            let mut tlsbase = kern_rsp - size_of::<TLSSegment>();
+            let tls = tlsbase as *mut TLSSegment;
+            ::core::ptr::write(tls, TLSSegment {
+                user_rsp: (KERNEL_MAPPING.UserStack.end+1),
+                kern_rsp: tlsbase
+            });
+        }
+        
+        task.ctx.cr3 = task.cr3.as_ref().unwrap().pml4_frame.start_address();
+        printk!(Debug, "init cr3 {:?} {}\n\r", task.cr3, task.ctx.cr3);
+
+        self.entry(pid).or_insert(Arc::new(RwLock::new(task)));
+        self.next_id += 1;
+    }
+
+    pub fn load_task(&mut self, name: &str, parent: ProcId) {
+        use core::mem::size_of;
+
+        let pid = self.next_id;
+        assert!(self.next_id < MAX_TASK, "task id exceeds maximum boundary");
+
+        let mut task = Task::empty();
+        task.pid = pid as isize;
+        task.ppid = parent; 
+        task.name = Some(name.to_string());
+        task.state = TaskState::Created;
+
+        task.cr3 = Some({
+            let mut mm = MM.try().unwrap().lock();
+            paging::create_address_space(mm.mbinfo)
+        });
+
+        task.user_stack = Some({
+            let mut vma = VirtualMemoryArea {
+                start: KERNEL_MAPPING.UserStack.start,
+                size: KERNEL_MAPPING.UserStack.end - KERNEL_MAPPING.UserStack.start + 1,
+                mapped: false,
+                flags: paging::USER | paging::WRITABLE | paging::NO_EXECUTE
+            };
+
+            vma.map(task.cr3.as_mut().unwrap());
+            vma.mapped = true;
+
+            vma
+        });
+
+        {
+            printk!(Debug, "load_task\n\r");
+            let kernel_base = KERNEL_MAPPING.KernelMap.start;
+            let mut mm = MM.try().unwrap().lock();
+            let init_mod = mm.mbinfo.module_tags().next().unwrap();
+            assert!(init_mod.name() == "init");
+
+            let (init_start, init_end) = (
+                init_mod.start_address() as usize + kernel_base,
+                init_mod.end_address() as usize + kernel_base);
+
+            unsafe {
+                let bytes = ::core::slice::from_raw_parts(
+                    init_start as *const u8, 
+                    (init_end - init_start) as usize);
+                let elf =  Elf64::from(bytes);
+                task.exec_entry = elf.header.e_entry as usize;
+
+                for ph in elf.program_headers() {
+                    printk!(Debug, "{:?}\n\r", ph);
+                    if (ph.p_type != PT_LOAD) { continue; }
+
+                    let sz = ph.p_memsz as usize;
+                    let data = elf.data.as_ptr().offset(ph.p_offset as isize);
+                    match (ph.p_flags & PF_X) != 0 {
+                        false => {
+                            printk!(Debug, "load data/bss segment\n\r");
+                        }, 
+
+                        true => {
+                            let code: &[u8; 20] = &*(data as *const [u8; 20]);
+                            printk!(Debug, "load code segment {:?}\n\r", code);
+                            task.code = Some({
+                                let mut vma = VirtualMemoryArea {
+                                    start: KERNEL_MAPPING.UserCode.start,
+                                    size: sz,
+                                    mapped: false,
+                                    flags: paging::USER | paging::WRITABLE
+                                };
+
+                                vma.map(task.cr3.as_mut().unwrap());
+                                vma.mapped = true;
+
+                                vma
+                            });
+
+                            use core::ptr;
+                            // switching pml4 is heavy
+                            let cur_pml4 = paging::switch(task.cr3.clone().unwrap());
+                            {
+                                let vma = task.code.clone().unwrap();
+                                ptr::copy_nonoverlapping(data as *mut u8,
+                                                         vma.start as *mut u8, sz);
+                            }
+                            paging::switch(cur_pml4);
+                        }
+                    }
+                }
+            }
+        }
+
 
         task.kern_stack = Some({
             let mem = vec![0u8; 8192].into_boxed_slice();
@@ -377,8 +502,13 @@ pub fn init() {
 
         {
             let mut tasks = TaskList::get_mut();
-            tasks.alloc_task(&"init", 1, test_userlevel as usize);
+            tasks.load_task(&"init", 1);
         }
+
+        //{
+            //let mut tasks = TaskList::get_mut();
+            //tasks.alloc_task(&"init", 1, test_userlevel as usize);
+        //}
 
         {
             let tasks = TaskList::get();
@@ -533,7 +663,7 @@ unsafe fn ret_to_userspace(init: &mut Task) -> ! {
     use x86_64;
 
     let frame = idt::ExceptionStackFrame {
-        rip: KERNEL_MAPPING.UserCode.start as u64, // init.code.as_ref().unwrap().start
+        rip: init.exec_entry as u64,
         cs: interrupts::USER_CS_SEL.0 as u64,
         rflags: init.ctx.rflags as u64,
         old_rsp: (KERNEL_MAPPING.UserStack.end+1) as u64,

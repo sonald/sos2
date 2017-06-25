@@ -1,0 +1,8 @@
+[package]
+name = "init"
+version = "0.1.0"
+authors = ["Sian Cao <yinshuiboy@gmail.com>"]
+
+
+[dependencies.libsos2]
+path = "../libsos2"

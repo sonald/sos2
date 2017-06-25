@@ -87,7 +87,9 @@ impl Mapper {
         let pdt = pdpt.next_level_table_or_create(vaddr.pdpt_index());
         let pt = pdt.next_level_table_or_create(vaddr.pdt_index());
 
-        assert!(pt[vaddr.pt_index()].is_unused());
+        assert!(pt[vaddr.pt_index()].is_unused(),
+            "pt[vaddr.pt_index()] used: vaddr {:#x} -> {:#x}\n\r",
+            vaddr, pt[vaddr.pt_index()].pointed_frame().as_ref().unwrap().start_address());
         pt[vaddr.pt_index()].set(frame, flags | PRESENT);
     }
 

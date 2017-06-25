@@ -406,11 +406,21 @@ pub fn create_address_space(mbinfo: &BootInformation) -> InactivePML4Table {
         }
 
         {
-            // map mbinfo
-            let r = FrameRange::new(mbinfo.start_address() - kernel_base,
-                mbinfo.end_address() - kernel_base);
-            printk!(Info, "map mbinfo({:#x} -> {:#x})\n\r", mbinfo.start_address() - kernel_base,
-                mbinfo.start_address());
+            use ::core::cmp::{min, max};
+            // map mbinfo and modules.
+            // NOTE: modules appears in front or end of mbinfo structure
+            let mods_start = mbinfo.module_tags().map(|a| a.start_address()).min().unwrap() as usize;
+            let mods_end = mbinfo.module_tags().map(|a| a.end_address()).max().unwrap() as usize;
+
+            let (mb_start, mb_end) = (
+                min(mods_start, mbinfo.start_address() - kernel_base),
+                max(mods_end, mbinfo.end_address() - kernel_base)
+                );
+
+            let r = FrameRange::new(mb_start, mb_end);
+            printk!(Info, "map mbinfo(include modules) [{:#x} -> {:#x})\n\r", 
+                    r.start.start_address(), r.end.start_address());
+
             for f in r {
                 let page = Page::from_vaddress(f.start_address() + kernel_base);
                 mapper.map_to(page, f, EntryFlags::empty());
@@ -432,6 +442,7 @@ pub fn create_address_space(mbinfo: &BootInformation) -> InactivePML4Table {
             });
 
             //FIXME: so FrameAllocator should not override this region
+            //heap occupies HEAP_RANGE of the end of physical area
             let mut r = {
                 let mmap = mbinfo.memory_map_tag().unwrap();
                 let end = mmap.memory_areas().map(|a| a.base_addr + a.length).max().unwrap() as usize;
@@ -538,6 +549,7 @@ pub fn test_paging_before_remap() {
 
 pub fn test_paging_after_remap() {
     let mut pml4 = ActivePML4Table::new();
+    printk!(Debug, "test_paging_after_remap\n\r");
 
     {
         use core::slice::from_raw_parts_mut;
@@ -560,6 +572,7 @@ pub fn test_paging_after_remap() {
 
         let page2 = Page { number: page.number + 100 };
         pml4.map(page2, WRITABLE);
+        printk!(Debug, "map {:#x}\n\r", page2.start_address());
         let mut v2 = unsafe { from_raw_parts_mut(page2.start_address() as *mut u8, 4096) };
         for p in v2.iter_mut() {
             *p = 3;

@@ -164,6 +164,36 @@ pub extern fn kernel_main(mb2_header: usize) {
     }
 }
 
+/// Get a stack trace
+//unsafe fn stack_trace() {
+    //use core::mem;
+    //let mut rbp: usize;
+    //asm!("" : "={rbp}"(rbp) : : : "intel", "volatile");
+
+    //println!("TRACE: {:>016X}", rbp);
+    ////Maximum 64 frames
+    //let active_table = memory::paging::ActivePML4Table::new();
+    //for _frame in 0..64 {
+        //if let Some(rip_rbp) = rbp.checked_add(mem::size_of::<usize>()) {
+            //if active_table.translate(rbp).is_some() && 
+                //active_table.translate(rip_rbp).is_some() {
+                //let rip = *(rip_rbp as *const usize);
+                //if rip == 0 {
+                    //println!(" {:>016X}: EMPTY RETURN", rbp);
+                    //break;
+                //}
+                //println!("  {:>016X}: {:>016X}", rbp, rip);
+                //rbp = *(rbp as *const usize);
+            //} else {
+                //println!("  {:>016X}: GUARD PAGE", rbp);
+                //break;
+            //}
+        //} else {
+            //println!("  {:>016X}: RBP OVERFLOW", rbp);
+        //}
+    //}
+//}
+
 #[lang = "eh_personality"]
 extern fn eh_personality() {}
 
@@ -171,6 +201,9 @@ extern fn eh_personality() {}
 #[no_mangle] pub extern fn panic_fmt(fmt: core::fmt::Arguments, file: &'static str, line: u32) -> ! {
 	printk!(Critical, "\n\rPanic at {}:{}\n\r", file, line);
     printk!(Critical, "    {}\n\r", fmt);
+
+    //unsafe { stack_trace(); }
+
     loop {
         unsafe { asm!("hlt":::: "volatile"); }
     }
