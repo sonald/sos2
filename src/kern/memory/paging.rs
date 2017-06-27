@@ -477,7 +477,7 @@ pub fn switch(new_map: InactivePML4Table) -> InactivePML4Table {
         ::kern::arch::cpu::cr3_set(new_map.pml4_frame.start_address());
     }
 
-    printk!(Info, "switching map from {:?} to {:?}\n\r", old, new_map);
+    //printk!(Info, "switching map from {:?} to {:?}\n\r", old, new_map);
     InactivePML4Table {
         pml4_frame: old
     }

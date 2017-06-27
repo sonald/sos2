@@ -15,6 +15,7 @@ use core::ops::{Deref, DerefMut};
 
 use spin::*;
 use ::kern::elf64::*;
+use x86_64;
 
 pub type ProcId = isize;
 
@@ -523,7 +524,6 @@ unsafe extern "C" fn start_task() -> ! {
 unsafe fn ret_to_userspace(init: &mut Task) -> ! {
     use ::kern::interrupts::{self, idt};
     use ::kern::syscall;
-    use x86_64;
 
     let frame = idt::ExceptionStackFrame {
         rip: init.exec_entry as u64,
@@ -532,9 +532,6 @@ unsafe fn ret_to_userspace(init: &mut Task) -> ! {
         old_rsp: (KERNEL_MAPPING.UserStack.end+1) as u64,
         old_ss: interrupts::USER_DS_SEL.0 as u64,
     };
-
-    interrupts::TSS.privilege_stack_table[0] = x86_64::VirtualAddress(init.ctx.rsp);
-    //printk!(Debug, "{:?} set TSS.rsp0\n", frame);
 
     {
         use x86_64::registers::msr;
@@ -545,9 +542,18 @@ unsafe fn ret_to_userspace(init: &mut Task) -> ! {
         if tls.kern_rsp != 0 {
             msr::wrmsr(msr::IA32_GS_BASE, tls.kern_rsp as u64);
         }
+
+        interrupts::TSS.privilege_stack_table[0] = x86_64::VirtualAddress(tls.kern_rsp);
+
+        // alternate way to write rsp0
+        //let rsp0: usize;
+        //asm!("movq %gs:(8), $0":"=r"(rsp0)::"memory":"volatile");
+        //interrupts::TSS.privilege_stack_table[0] = x86_64::VirtualAddress(rsp0);
+        //printk!(Debug, "{:?} set TSS.rsp0\n", frame);
     }
 
-    cpu::cr3_set(init.cr3.as_ref().unwrap().pml4_frame.start_address());
+
+    paging::switch(init.cr3.clone().unwrap());
 
 
     asm!("
@@ -611,11 +617,22 @@ pub unsafe fn sched() {
     //printk!(Debug, "switch {} {:#x} to {} {:#x}\n", id, (&*current).ctx.rsp, nid, (&*next).ctx.rsp);
     //printk!(Debug, "switch {:?} \n-> {:?}\n", (&*current).ctx, (&*next).ctx);
 
-    //TODO: if next is another user task, gs base should be set accordingly
-    
     if next as usize != 0 {
-        if (*current).ctx.cr3 != (*next).ctx.cr3 {
-            cpu::cr3_set((*next).cr3.as_ref().unwrap().pml4_frame.start_address());
+        use x86_64::registers::msr;
+        
+        let next = &mut *next;
+        if next.user_stack.is_some() { // which means it's a user task
+            let tlsbase = next.kern_stack.as_ref().map(|st| st.top()).unwrap()
+                - ::core::mem::size_of::<TLSSegment>();
+            let tls = &*(tlsbase as *const TLSSegment);
+            if tls.kern_rsp != 0 {
+                msr::wrmsr(msr::IA32_GS_BASE, tls.kern_rsp as u64);
+            }
+            interrupts::TSS.privilege_stack_table[0] = x86_64::VirtualAddress(tls.kern_rsp);
+
+            if (*current).ctx.cr3 != next.ctx.cr3 {
+                paging::switch(next.cr3.clone().unwrap());
+            }
         }
         switch_to(&mut *current, &mut *next); 
     }
