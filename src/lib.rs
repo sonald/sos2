@@ -165,34 +165,35 @@ pub extern fn kernel_main(mb2_header: usize) {
 }
 
 /// Get a stack trace
-//unsafe fn stack_trace() {
-    //use core::mem;
-    //let mut rbp: usize;
-    //asm!("" : "={rbp}"(rbp) : : : "intel", "volatile");
+/// TODO: extract symbol names from kernel elf
+unsafe fn stack_trace() {
+    use core::mem;
+    let mut rbp: usize;
+    asm!("" : "={rbp}"(rbp) : : : "intel", "volatile");
 
-    //println!("TRACE: {:>016X}", rbp);
-    ////Maximum 64 frames
-    //let active_table = memory::paging::ActivePML4Table::new();
-    //for _frame in 0..64 {
-        //if let Some(rip_rbp) = rbp.checked_add(mem::size_of::<usize>()) {
-            //if active_table.translate(rbp).is_some() && 
-                //active_table.translate(rip_rbp).is_some() {
-                //let rip = *(rip_rbp as *const usize);
-                //if rip == 0 {
-                    //println!(" {:>016X}: EMPTY RETURN", rbp);
-                    //break;
-                //}
-                //println!("  {:>016X}: {:>016X}", rbp, rip);
-                //rbp = *(rbp as *const usize);
-            //} else {
-                //println!("  {:>016X}: GUARD PAGE", rbp);
-                //break;
-            //}
-        //} else {
-            //println!("  {:>016X}: RBP OVERFLOW", rbp);
-        //}
-    //}
-//}
+    println!("backtrace: {:>016x}", rbp);
+    //Maximum 64 frames
+    let active_table = memory::paging::ActivePML4Table::new();
+    for _frame in 0..64 {
+        if let Some(rip_rbp) = rbp.checked_add(mem::size_of::<usize>()) {
+            if active_table.translate(rbp).is_some() && 
+                active_table.translate(rip_rbp).is_some() {
+                let rip = *(rip_rbp as *const usize);
+                if rip == 0 {
+                    println!(" {:>016x}: EMPTY RETURN", rbp);
+                    break;
+                }
+                println!("  {:>016x}: ret rip {:>016x}", rbp, rip);
+                rbp = *(rbp as *const usize);
+            } else {
+                println!("  {:>016x}: Invalid", rbp);
+                break;
+            }
+        } else {
+            println!("  {:>016x}: RBP OVERFLOW", rbp);
+        }
+    }
+}
 
 #[lang = "eh_personality"]
 extern fn eh_personality() {}
@@ -202,7 +203,7 @@ extern fn eh_personality() {}
 	printk!(Critical, "\n\rPanic at {}:{}\n\r", file, line);
     printk!(Critical, "    {}\n\r", fmt);
 
-    //unsafe { stack_trace(); }
+    unsafe { stack_trace(); }
 
     loop {
         unsafe { asm!("hlt":::: "volatile"); }

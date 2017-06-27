@@ -12,8 +12,7 @@ pub fn test() {
     let mut a3 = 4;
     let mut a4 = 5;
     let mut a5 = 6;
-    let buf = [b'u', b's', b'e', b'r', b's', b'p', b'a', b'c', b'e'];
-    //let buf = b"userspace";
+    let buf = b"userspace";
 
     loop {
         unsafe {
@@ -26,7 +25,7 @@ pub fn test() {
                  :
                  :"{rax}"(16), // write is 16
                  "{rdi}"(a0),
-                 "{rsi}"(&buf as *const _ as usize),
+                 "{rsi}"(buf as *const _ as usize),
                  "{rdx}"(9),
                  "{r8}"(a3),
                  "{r9}"(a4),

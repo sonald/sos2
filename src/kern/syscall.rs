@@ -60,7 +60,7 @@ pub unsafe extern "C" fn syscall_dispatch(id: usize, args: *const usize)
     let args = ::core::slice::from_raw_parts(args, 6);
     let tid = task::CURRENT_ID.load(Ordering::SeqCst);
     Console::with(&tty1, 19, 0, || {
-        printk!(Info, "syscall({}) tid {}: {} {} {} {} {} {}\n\r", id, tid, 
+        printk!(Info, "syscall({}) tid {}: {:#x} {:#x} {:#x} {:#x} {:#x} {:#x}\n\r", id, tid, 
                 args[0], args[1], args[2], args[3], args[4], args[5]);
     });
 
