@@ -194,7 +194,6 @@ pub struct Elf64<'a> {
 impl<'a> Elf64<'a> {
     pub unsafe fn from(bytes: &'a [u8]) -> Elf64<'a> {
         let h = &*(bytes.as_ptr() as *const Header);
-        printk!(Debug, "{:?}\n\r", h);
 
         Elf64 {
             data: bytes,

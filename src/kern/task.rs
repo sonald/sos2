@@ -244,7 +244,7 @@ impl TaskList {
     }
 
     // user task
-    pub fn load_task(&mut self, name: &str, parent: ProcId) {
+    pub fn load_task(&mut self, name: &str, elf: &Elf64, parent: ProcId) {
         use core::mem::size_of;
 
         let pid = self.next_id;
@@ -275,62 +275,47 @@ impl TaskList {
             vma
         });
 
-        {
-            printk!(Debug, "load_task\n\r");
-            let kernel_base = KERNEL_MAPPING.KernelMap.start;
-            let mut mm = MM.try().unwrap().lock();
-            let init_mod = mm.mbinfo.module_tags().next().unwrap();
-            assert!(init_mod.name() == "init");
+        unsafe {
+            printk!(Debug, "load program_headers\n\r");
+            task.exec_entry = elf.header.e_entry as usize;
 
-            let (init_start, init_end) = (
-                init_mod.start_address() as usize + kernel_base,
-                init_mod.end_address() as usize + kernel_base);
+            for ph in elf.program_headers() {
+                printk!(Debug, "{:?}\n\r", ph);
+                if ph.p_type != PT_LOAD { continue; }
 
-            unsafe {
-                let bytes = ::core::slice::from_raw_parts(
-                    init_start as *const u8, 
-                    (init_end - init_start) as usize);
-                let elf =  Elf64::from(bytes);
-                task.exec_entry = elf.header.e_entry as usize;
+                let sz = ph.p_memsz as usize;
+                let data = elf.data.as_ptr().offset(ph.p_offset as isize);
+                match (ph.p_flags & PF_X) != 0 {
+                    false => {
+                        printk!(Debug, "load data/bss segment\n\r");
+                    }, 
 
-                for ph in elf.program_headers() {
-                    printk!(Debug, "{:?}\n\r", ph);
-                    if ph.p_type != PT_LOAD { continue; }
+                    true => {
+                        let code: &[u8; 20] = &*(data as *const [u8; 20]);
+                        printk!(Debug, "load code segment {:?}\n\r", code);
+                        task.code = Some({
+                            let mut vma = VirtualMemoryArea {
+                                start: KERNEL_MAPPING.UserCode.start,
+                                size: sz,
+                                mapped: false,
+                                flags: paging::USER | paging::WRITABLE
+                            };
 
-                    let sz = ph.p_memsz as usize;
-                    let data = elf.data.as_ptr().offset(ph.p_offset as isize);
-                    match (ph.p_flags & PF_X) != 0 {
-                        false => {
-                            printk!(Debug, "load data/bss segment\n\r");
-                        }, 
+                            vma.map(task.cr3.as_mut().unwrap());
+                            vma.mapped = true;
 
-                        true => {
-                            let code: &[u8; 20] = &*(data as *const [u8; 20]);
-                            printk!(Debug, "load code segment {:?}\n\r", code);
-                            task.code = Some({
-                                let mut vma = VirtualMemoryArea {
-                                    start: KERNEL_MAPPING.UserCode.start,
-                                    size: sz,
-                                    mapped: false,
-                                    flags: paging::USER | paging::WRITABLE
-                                };
+                            vma
+                        });
 
-                                vma.map(task.cr3.as_mut().unwrap());
-                                vma.mapped = true;
-
-                                vma
-                            });
-
-                            use core::ptr;
-                            // switching pml4 is heavy
-                            let cur_pml4 = paging::switch(task.cr3.clone().unwrap());
-                            {
-                                let vma = task.code.clone().unwrap();
-                                ptr::copy_nonoverlapping(data as *mut u8,
-                                                         vma.start as *mut u8, sz);
-                            }
-                            paging::switch(cur_pml4);
+                        use core::ptr;
+                        // switching pml4 is heavy
+                        let cur_pml4 = paging::switch(task.cr3.clone().unwrap());
+                        {
+                            let vma = task.code.clone().unwrap();
+                            ptr::copy_nonoverlapping(data as *mut u8,
+                                                     vma.start as *mut u8, sz);
                         }
+                        paging::switch(cur_pml4);
                     }
                 }
             }
@@ -410,16 +395,32 @@ pub fn init() {
 
 
     { 
-        use x86_64;
-
-        let init: *mut Task;
         unsafe { x86_64::instructions::interrupts::disable(); }
 
         {
+            printk!(Debug, "load init from module\n\r");
+
+            let elf = unsafe {
+                let kernel_base = KERNEL_MAPPING.KernelMap.start;
+                let mut mm = MM.try().unwrap().lock();
+                let init_mod = mm.mbinfo.module_tags().next().unwrap();
+                assert!(init_mod.name() == "init");
+
+                let (init_start, init_end) = (
+                    init_mod.start_address() as usize + kernel_base,
+                    init_mod.end_address() as usize + kernel_base
+                );
+                let bytes = ::core::slice::from_raw_parts(init_start as *const u8, 
+                    (init_end - init_start) as usize);
+                Elf64::from(bytes)
+            };
+            printk!(Debug, "{:?}\n\r", elf.header);
+
             let mut tasks = TaskList::get_mut();
-            tasks.load_task(&"init", 1);
+            tasks.load_task(&"init", &elf, 1);
         }
 
+        let init: *mut Task;
         {
             let tasks = TaskList::get();
             let task_lock = tasks.get_task(4).expect("task 4");
