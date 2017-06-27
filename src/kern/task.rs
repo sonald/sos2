@@ -243,92 +243,6 @@ impl TaskList {
     }
 
     // user task
-    pub fn alloc_task(&mut self, name: &str, parent: ProcId, rip: usize) {
-        use core::mem::size_of;
-
-        let pid = self.next_id;
-        assert!(self.next_id < MAX_TASK, "task id exceeds maximum boundary");
-
-        let mut task = Task::empty();
-        task.pid = pid as isize;
-        task.ppid = parent; 
-        task.name = Some(name.to_string());
-        task.state = TaskState::Created;
-        task.exec_entry = rip;
-
-        task.cr3 = Some({
-            let mut mm = MM.try().unwrap().lock();
-            paging::create_address_space(mm.mbinfo)
-        });
-
-        task.user_stack = Some({
-            let mut vma = VirtualMemoryArea {
-                start: KERNEL_MAPPING.UserStack.start,
-                size: KERNEL_MAPPING.UserStack.end - KERNEL_MAPPING.UserStack.start + 1,
-                mapped: false,
-                flags: paging::USER | paging::WRITABLE | paging::NO_EXECUTE
-            };
-
-            vma.map(task.cr3.as_mut().unwrap());
-            vma.mapped = true;
-
-            vma
-        });
-
-        task.code = Some({
-            let mut vma = VirtualMemoryArea {
-                start: KERNEL_MAPPING.UserCode.start,
-                size: 0x1000, // should be size_of<Func>
-                mapped: false,
-                flags: paging::USER | paging::WRITABLE
-            };
-
-            vma.map(task.cr3.as_mut().unwrap());
-            vma.mapped = true;
-
-            vma
-        });
-
-        unsafe {
-            use core::ptr;
-            // switching pml4 is heavy
-            let cur_pml4 = paging::switch(task.cr3.clone().unwrap());
-
-            {
-                let vma = task.code.clone().unwrap();
-                ptr::copy_nonoverlapping(task.exec_entry as *mut u8,
-                                         vma.start as *mut u8, 0x1000);
-            }
-
-            paging::switch(cur_pml4);
-        }
-
-        task.kern_stack = Some({
-            let mem = vec![0u8; 8192].into_boxed_slice();
-            printk!(Debug, "boxed slice [{:#x}, {:#x})\n\r", mem.as_ptr() as usize, mem.len());
-            let top = mem.as_ptr() as usize;
-            Stack::new(top + mem.len(), top)
-        });
-        task.ctx = Context::new();
-        let kern_rsp = task.kern_stack.as_ref().map(|st| st.top()).unwrap();
-        task.ctx.rflags = 0x0202;
-        task.ctx.rsp = kern_rsp - size_of::<TLSSegment>();
-        unsafe { 
-            let mut tlsbase = kern_rsp - size_of::<TLSSegment>();
-            let tls = tlsbase as *mut TLSSegment;
-            ::core::ptr::write(tls, TLSSegment {
-                user_rsp: (KERNEL_MAPPING.UserStack.end+1),
-                kern_rsp: tlsbase
-            });
-        }
-        
-        task.ctx.cr3 = task.cr3.as_ref().unwrap().pml4_frame.start_address();
-        printk!(Debug, "init cr3 {:?} {}\n\r", task.cr3, task.ctx.cr3);
-
-        self.entry(pid).or_insert(Arc::new(RwLock::new(task)));
-        self.next_id += 1;
-    }
-
     pub fn load_task(&mut self, name: &str, parent: ProcId) {
         use core::mem::size_of;
 
@@ -380,7 +294,7 @@ impl TaskList {
 
                 for ph in elf.program_headers() {
                     printk!(Debug, "{:?}\n\r", ph);
-                    if (ph.p_type != PT_LOAD) { continue; }
+                    if ph.p_type != PT_LOAD { continue; }
 
                     let sz = ph.p_memsz as usize;
                     let data = elf.data.as_ptr().offset(ph.p_offset as isize);
@@ -505,11 +419,6 @@ pub fn init() {
             tasks.load_task(&"init", 1);
         }
 
-        //{
-            //let mut tasks = TaskList::get_mut();
-            //tasks.alloc_task(&"init", 1, test_userlevel as usize);
-        //}
-
         {
             let tasks = TaskList::get();
             let task_lock = tasks.get_task(4).expect("task 4");
@@ -523,12 +432,12 @@ pub fn init() {
         unsafe { ret_to_userspace(&mut *init); }
     }
 
-    printk!(Info, "tasks done\n\r");
+    panic!("task done");
 }
 
 pub fn idle() {
     loop {
-        unsafe { asm!("hlt":::: "volatile"); }
+        unsafe { asm!("sti; hlt":::: "volatile"); }
     }
 }
 
@@ -563,52 +472,6 @@ pub fn test_thread() {
         });
         count += 1;
         busy_wait();
-    }
-}
-
-pub fn test_userlevel() {
-    let mut a0 = 1;
-    let mut a1 = 2;
-    let mut a2 = 3;
-    let mut a3 = 4;
-    let mut a4 = 5;
-    let mut a5 = 6;
-    let buf = [b'u', b's', b'e', b'r', b's', b'p', b'a', b'c', b'e'];
-
-    loop {
-        unsafe {
-            asm!("
-                pushq %rcx
-                pushq %r11
-                 syscall
-                 popq %r11
-                 popq %rcx"
-                 :
-                 :"{rax}"(16), // write is 16
-                 "{rdi}"(a0),
-                 "{rsi}"(&buf as *const _ as usize),
-                 "{rdx}"(9),
-                 "{r8}"(a3),
-                 "{r9}"(a4),
-                 "{r10}"(a5)
-                 :"rcx", "r11"
-                 :"volatile"
-                 ); 
-        }
-        a0 += 1;
-        a1 += 1;
-        a2 += 1;
-        a3 += 1;
-        a4 += 1;
-        a5 += 1;
-
-        let mut i = 1;
-        while i < 10000 {
-            unsafe {
-                asm!("pause":::"memory":"volatile");
-            }
-            i += 1;
-        }
     }
 }
 
