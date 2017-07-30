@@ -81,6 +81,25 @@ impl VirtualMemoryArea {
         }
     }
 
+    pub fn map_with_data(&self, inactive: &mut InactivePML4Table, data: &[u8]) {
+        let mut active = paging::ActivePML4Table::new();
+        let mut temp_page = TemporaryPage::new(paging::Page::from_vaddress(0xfffff_cafe_beef_000));
+        printk!(Debug, "mapping VirtualMemoryArea {:?} {:?}\n\r", self.get_pages(), self.flags);
+        active.with(inactive, &mut temp_page, |mapper| {
+            for page in self.get_pages() {
+                mapper.map(page, self.flags);
+            }
+        });
+
+        // switching pml4 is heavy
+        let cur_pml4 = paging::switch(inactive.clone());
+        unsafe {
+            ::core::ptr::copy_nonoverlapping(data.as_ptr() as *mut u8,
+                self.start as *mut u8, data.len());
+        }
+        paging::switch(cur_pml4);
+    }
+
     pub fn map(&self, inactive: &mut InactivePML4Table) {
         let mut active = paging::ActivePML4Table::new();
         let mut temp_page = TemporaryPage::new(paging::Page::from_vaddress(0xfffff_cafe_beef_000));
@@ -93,6 +112,7 @@ impl VirtualMemoryArea {
     }
 
     pub fn unmap(&mut self, inactive: &mut InactivePML4Table) {
+        unimplemented!()
     }
 
     pub fn get_pages(&self) -> paging::PageRange {
@@ -275,7 +295,7 @@ impl TaskList {
             vma
         });
 
-        unsafe {
+        {
             printk!(Debug, "load program_headers\n\r");
             task.exec_entry = elf.header.e_entry as usize;
 
@@ -284,15 +304,15 @@ impl TaskList {
                 if ph.p_type != PT_LOAD { continue; }
 
                 let sz = ph.p_memsz as usize;
-                let data = elf.data.as_ptr().offset(ph.p_offset as isize);
+                let data = unsafe { elf.data.as_ptr().offset(ph.p_offset as isize) };
                 match (ph.p_flags & PF_X) != 0 {
                     false => {
                         printk!(Debug, "load data/bss segment\n\r");
                     }, 
 
                     true => {
-                        let code: &[u8; 20] = &*(data as *const [u8; 20]);
-                        printk!(Debug, "load code segment {:?}\n\r", code);
+                        //let code: &[u8; 20] = &*(data as *const [u8; 20]);
+                        //printk!(Debug, "load code segment {:?}\n\r", code);
                         task.code = Some({
                             let mut vma = VirtualMemoryArea {
                                 start: KERNEL_MAPPING.UserCode.start,
@@ -301,21 +321,13 @@ impl TaskList {
                                 flags: paging::USER | paging::WRITABLE
                             };
 
-                            vma.map(task.cr3.as_mut().unwrap());
+                            let data = unsafe { ::core::slice::from_raw_parts(data, sz) };
+                            vma.map_with_data(task.cr3.as_mut().unwrap(), data);
                             vma.mapped = true;
 
                             vma
                         });
 
-                        use core::ptr;
-                        // switching pml4 is heavy
-                        let cur_pml4 = paging::switch(task.cr3.clone().unwrap());
-                        {
-                            let vma = task.code.clone().unwrap();
-                            ptr::copy_nonoverlapping(data as *mut u8,
-                                                     vma.start as *mut u8, sz);
-                        }
-                        paging::switch(cur_pml4);
                     }
                 }
             }
