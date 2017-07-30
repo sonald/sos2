@@ -24,7 +24,7 @@ impl Mapper {
     /// pointer to top level table virtual address, only if table is recursive-mapped.
     pub fn new() -> Mapper {
         Mapper {
-            top: unsafe { Unique::new(0xffffffff_fffff000 as *mut _) }
+            top: unsafe { Unique::new_unchecked(0xffffffff_fffff000 as *mut _) }
         }
     } 
 

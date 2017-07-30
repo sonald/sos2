@@ -429,17 +429,9 @@ pub fn create_address_space(mbinfo: &BootInformation) -> InactivePML4Table {
 
         {
             //map kheap area to high end of physical area
-            use kheap_allocator;
-
             //TODO: should be lazily mapped after page fault sets up
             let start_address = KERNEL_MAPPING.KernelHeap.start;
             let alloc_size = KERNEL_MAPPING.KernelHeap.end - KERNEL_MAPPING.KernelHeap.start + 1;
-            kheap_allocator::HEAP_RANGE.call_once(|| {
-                Range {
-                    start: start_address,
-                    end: start_address + alloc_size
-                }
-            });
 
             //FIXME: so FrameAllocator should not override this region
             //heap occupies HEAP_RANGE of the end of physical area
@@ -458,6 +450,7 @@ pub fn create_address_space(mbinfo: &BootInformation) -> InactivePML4Table {
                 let f = r.next().unwrap();
                 mapper.map_to(page, f, WRITABLE);
             }
+
         }
     });
 
@@ -468,6 +461,11 @@ pub fn create_address_space(mbinfo: &BootInformation) -> InactivePML4Table {
 pub fn remap_the_kernel(mbinfo: &BootInformation) {
     let mut new_map = create_address_space(mbinfo);
     switch(new_map);
+
+    let start_address = KERNEL_MAPPING.KernelHeap.start;
+    let alloc_size = KERNEL_MAPPING.KernelHeap.end - KERNEL_MAPPING.KernelHeap.start + 1;
+    use kheap_allocator;
+    kheap_allocator::init(start_address, alloc_size);
 }
 
 pub fn switch(new_map: InactivePML4Table) -> InactivePML4Table {

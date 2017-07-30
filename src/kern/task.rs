@@ -11,6 +11,8 @@ use core::sync::atomic::{AtomicIsize, Ordering};
 use collections::string::{String, ToString};
 use collections::{BTreeMap, Vec};
 use alloc::arc::Arc;
+use alloc::heap::Heap;
+use alloc::allocator::{Alloc, Layout};
 use core::ops::{Deref, DerefMut};
 
 use spin::*;
@@ -226,7 +228,10 @@ impl TaskList {
         task.exec_entry = rip;
 
         task.kern_stack = Some({
-            let mem = vec![0u8; 8192].into_boxed_slice();
+            let mem = unsafe {
+                &*(Heap.alloc(Layout::from_size_align_unchecked(8192, 1)).unwrap() as *mut [u8; 8192])
+            };
+
             printk!(Debug, "boxed slice [{:#x}, {:#x})\n\r", mem.as_ptr() as usize, mem.len());
             let top = mem.as_ptr() as usize;
             Stack::new(top + mem.len(), top)
@@ -335,7 +340,9 @@ impl TaskList {
 
 
         task.kern_stack = Some({
-            let mem = vec![0u8; 8192].into_boxed_slice();
+            let mem = unsafe {
+                &*(Heap.alloc(Layout::from_size_align_unchecked(8192, 1)).unwrap() as *mut [u8; 8192])
+            };
             printk!(Debug, "boxed slice [{:#x}, {:#x})\n\r", mem.as_ptr() as usize, mem.len());
             let top = mem.as_ptr() as usize;
             Stack::new(top + mem.len(), top)

@@ -154,7 +154,7 @@ impl ConsoleDriver {
     const fn new() -> ConsoleDriver {
         use ::kern::memory::KERNEL_MAPPING;
         ConsoleDriver {
-            buf: unsafe { Unique::new((KERNEL_MAPPING.KernelMap.start + 0xb8000) as *mut _) },
+            buf: unsafe { Unique::new_unchecked((KERNEL_MAPPING.KernelMap.start + 0xb8000) as *mut _) },
             crtc_reg: Port::new(CRTC_ADDR_REG),
             crtc_data: Port::new(CRTC_ADDR_DATA)
         }

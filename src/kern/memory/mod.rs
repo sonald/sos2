@@ -12,7 +12,6 @@ use self::stack_allocator::StackAllocator;
 use self::inactive::InactivePML4Table;
 
 use spin::{Mutex, Once};
-use kheap_allocator;
 use multiboot2::*;
 
 use ::kern::console as con;

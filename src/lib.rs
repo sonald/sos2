@@ -93,20 +93,21 @@ fn display(fb: &mut Framebuffer) {
 }
 
 fn test_kheap_allocator() {
-    let mut v = vec![1,2,3,4];
-    let b = alloc::boxed::Box::new(0xcafe);
-    printk!(Debug, "v = {:?}, b = {:?}\n\r", v, b);
-    let vs = vec!["Loading", "SOS2", "\n\r"];
-    for s in vs {
-        printk!(Debug, "{} ", s);
+    for _ in 0..10 {
+        let mut v = vec![1,2,3,4];
+        let b = alloc::boxed::Box::new(0xcafe);
+        printk!(Debug, "v = {:?}, b = {:?}\n\r", v, b);
+        let vs = vec!["Loading", "SOS2", "\n\r"];
+        for s in vs {
+            printk!(Debug, "{} ", s);
+        }
+
+        for i in 1..0x1000 * 40 {
+            v.push(i);
+        }
     }
 
-    for i in 1..0x1000 * 40 {
-        v.push(i);
-    }
-
-    let range = kheap::HEAP_RANGE.try().unwrap();
-    printk!(Critical, "Heap usage: {:#x}\n\r", kheap::KHEAP_ALLOCATOR.lock().current - range.start);
+    loop {}
 }
 
 extern {

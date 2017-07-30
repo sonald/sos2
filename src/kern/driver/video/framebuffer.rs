@@ -60,7 +60,7 @@ impl Framebuffer {
 
         unsafe {
             Framebuffer {
-                buf: Unique::new(base as *mut Rgba),
+                buf: Unique::new_unchecked(base as *mut Rgba),
                 width: fb.width as i32,
                 height: fb.height as i32,
                 pitch: fb.pitch as i32
