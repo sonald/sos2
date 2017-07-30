@@ -1,8 +1,11 @@
 #![feature(const_fn)]
-#![feature(allocator)]
-
-#![allocator]
+#![feature(global_allocator)]
+#![feature(alloc)]
+#![feature(allocator_api)]
 #![no_std]
+
+extern crate alloc;
+use alloc::heap::{Alloc, Layout, AllocErr};
 
 extern crate spin;
 use spin::{Mutex, Once};
@@ -49,47 +52,15 @@ impl KHeapAllocator {
 
 pub static KHEAP_ALLOCATOR: Mutex<KHeapAllocator> = Mutex::new(KHeapAllocator::new());
 
-#[no_mangle]
-pub extern fn __rust_allocate(size: usize, _align: usize) -> *mut u8 {
-    KHEAP_ALLOCATOR.lock().alloc(size, _align).expect("oom")
-}
 
+pub struct Allocator;
 
-#[no_mangle]
-pub extern fn __rust_allocate_zeroed(size: usize, _align: usize) -> *mut u8 {
-    let ptr = KHEAP_ALLOCATOR.lock().alloc(size, _align).expect("oom");
-    assert!(!ptr.is_null(), "null ptr in allocation");
-    unsafe {
-        ptr::write_bytes(ptr, 0, size)
+unsafe impl<'a> Alloc for &'a Allocator {
+    unsafe fn alloc(&mut self, layout: Layout) -> Result<*mut u8, AllocErr> {
+        KHEAP_ALLOCATOR.lock().alloc(layout.size(), layout.align()).ok_or(AllocErr::Exhausted {request: layout})
     }
-    ptr
-}
 
-#[no_mangle]
-pub extern fn __rust_deallocate(ptr: *mut u8, _old_size: usize, _align: usize) {
-}
-
-#[no_mangle]
-pub extern fn __rust_reallocate(ptr: *mut u8, _old_size: usize, size: usize,
-                                _align: usize) -> *mut u8 {
-    let new_ptr = KHEAP_ALLOCATOR.lock().alloc(size, _align).expect("oom");
-    unsafe {
-        use core::ptr::copy;
-        use core::cmp;
-        copy(ptr, new_ptr, cmp::min(size, _old_size));
+    unsafe fn dealloc(&mut self, ptr: *mut u8, layout: Layout) {
     }
-    __rust_deallocate(ptr, _old_size, _align);
-
-    new_ptr
 }
 
-#[no_mangle]
-pub extern fn __rust_reallocate_inplace(_ptr: *mut u8, old_size: usize,
-                                        _size: usize, _align: usize) -> usize {
-    old_size
-}
-
-#[no_mangle]
-pub extern fn __rust_usable_size(size: usize, _align: usize) -> usize {
-    size
-}

@@ -1,4 +1,6 @@
 #![feature(lang_items)]
+#![feature(global_allocator)]
+#![feature(allocator_api)]
 #![feature(const_fn)]
 #![feature(unique)]
 #![feature(asm)]
@@ -39,6 +41,9 @@ use kheap_allocator as kheap;
 use kern::driver::video::{Framebuffer, Point, Rgba};
 use kern::task;
 use kern::syscall;
+
+#[global_allocator]
+static GLOBAL_ALLOCATOR: kheap::Allocator = kheap::Allocator;
 
 #[allow(dead_code)]
 fn busy_wait () {
