@@ -5,6 +5,7 @@ use multiboot2::*;
 use super::PAGE_SIZE;
 use super::KERNEL_MAPPING;
 use spin::Mutex;
+use super::frame_allocator::BuddyAllocator;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Frame {
@@ -151,34 +152,44 @@ impl AreaFrameAllocator {
     }
 }
 
+/// two stage strategy. during initialization and before kernel heap is running,
+/// use fast AreaFrameAllocator, and then reset it to BuddyAllocator
+struct FrameAllocatorProxy<T: FrameAllocator, U: FrameAllocator> {
+    initial: bool,
+    allocator: T,
+    alternative: Option<U>,
 
-struct FrameAllocatorProxy<T> {
-    allocator: T
 }
 
-static FRAME_ALLOCATOR: Mutex<Option<FrameAllocatorProxy<AreaFrameAllocator>>> = Mutex::new(None);
+static FRAME_ALLOCATOR: Mutex<Option<FrameAllocatorProxy<AreaFrameAllocator, BuddyAllocator>>> = Mutex::new(None);
 
-impl<T: FrameAllocator> FrameAllocatorProxy<T> {
-    pub fn new(t: T) -> FrameAllocatorProxy<T> {
-        FrameAllocatorProxy {
-            allocator: t
+impl<T: FrameAllocator, U: FrameAllocator> FrameAllocatorProxy<T, U> {
+    pub fn new(allocator: T) -> FrameAllocatorProxy<T, U> {
+        let alternative = None;
+        let initial = true;
+        FrameAllocatorProxy { initial, allocator, alternative }
+    }
+}
+
+impl<T: FrameAllocator, U: FrameAllocator> FrameAllocatorProxy<T, U> {
+    fn alloc_frame(&mut self) -> Option<Frame> {
+        match self.initial {
+            true => self.allocator.alloc_frame(),
+            _ => self.alternative.as_mut().unwrap().alloc_frame()
+        }
+    }
+
+    fn dealloc_frame(&mut self, frame: Frame) {
+        match self.initial {
+            true => self.allocator.dealloc_frame(frame),
+            _ => self.alternative.as_mut().unwrap().dealloc_frame(frame)
         }
     }
 }
 
-impl<T: FrameAllocator> FrameAllocator for FrameAllocatorProxy<T> {
-    fn alloc_frame(&mut self) -> Option<Frame> {
-        self.allocator.alloc_frame()
-    }
-
-    fn dealloc_frame(&mut self, frame: Frame) {
-        self.allocator.dealloc_frame(frame)
-    }
-}
-
 pub fn alloc_frame() -> Option<Frame> {
-    if let Some(ref mut allocator) = *FRAME_ALLOCATOR.lock() {
-        allocator.alloc_frame()
+    if let Some(ref mut proxy) = *FRAME_ALLOCATOR.lock() {
+        proxy.alloc_frame()
     } else {
         panic!("FRAME_ALLOCATOR is not initialized\n");
     }
@@ -186,8 +197,39 @@ pub fn alloc_frame() -> Option<Frame> {
 }
 
 pub fn dealloc_frame(frame: Frame) {
-    if let Some(ref mut allocator) = *FRAME_ALLOCATOR.lock() {
-        allocator.dealloc_frame(frame)
+    if let Some(ref mut proxy) = *FRAME_ALLOCATOR.lock() {
+        proxy.dealloc_frame(frame)
+    } else {
+        panic!("FRAME_ALLOCATOR is not initialized\n");
+    }
+}
+
+pub fn upgrade_allocator(mbinfo: &'static BootInformation) {
+    use ::kern::console as con;
+    use con::LogLevel::*;
+    use ::core::cmp::max;
+
+    if let Some(ref mut proxy) = *FRAME_ALLOCATOR.lock() {
+        //FIXME: exclude heap area
+        let area = {
+            let area = {
+                let mmap = mbinfo.memory_map_tag().expect("memory map is unavailable");
+                let max = mmap.memory_areas().max_by_key(|a| a.base_addr).unwrap();
+                (max.base_addr as usize, (max.base_addr + max.length) as usize)
+            };
+            let current = proxy.allocator.next_free_frame.start_address();
+            let v = [
+                current,
+                area.0,
+                proxy.allocator.kernel.end.start_address(),
+                proxy.allocator.multiboot.end.start_address(),
+            ];
+            (*v.into_iter().max().unwrap(), area.1)
+        };
+        printk!(Info, "upgrade allocator for [{:#x}, {:#x})\n", area.0, area.1);
+
+        proxy.initial = false;
+        proxy.alternative = Some(BuddyAllocator::new(area.0, area.1 - area.0));
     } else {
         panic!("FRAME_ALLOCATOR is not initialized\n");
     }

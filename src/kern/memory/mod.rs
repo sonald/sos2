@@ -3,6 +3,7 @@ pub mod paging;
 pub mod inactive;
 pub mod mapper;
 pub mod stack_allocator;
+pub mod frame_allocator;
 
 pub use self::stack_allocator::Stack;
 
@@ -87,10 +88,12 @@ pub fn init(mbinfo: &'static BootInformation) -> &'static Mutex<MemoryManager<'s
     ::kern::arch::cpu::enable_nxe_bit();
     ::kern::arch::cpu::enable_write_protect_bit();
     remap_the_kernel(&mbinfo);
+    frame::upgrade_allocator(&mbinfo);
     if cfg!(feature = "test") {
-        test_frame_allocator();
+        test_frame_allocator_upgraded();
         test_paging_after_remap();
     }
+
 
     //after heap
     let stack_allocator = {
@@ -115,10 +118,30 @@ pub fn init(mbinfo: &'static BootInformation) -> &'static Mutex<MemoryManager<'s
 fn test_frame_allocator() {
     let mut i = 0;
     while let Some(_) = frame::alloc_frame() {
-        //printk!(Warn, "0x{:x}  ", f.number);
+        //printk!(Warn, "{:#x}({:#x})  ", f.number, f.start_address());
         i += 1;
-        if i == 100 { break }
+        if i == 20 { break }
     }
     printk!(Warn, "allocated #{} frames\n\r", i);
 }
 
+fn test_frame_allocator_upgraded() {
+    use collections::Vec;
+
+    let mut v = Vec::new();
+    let mut i = 0;
+    for _ in 0..30 {
+        if let Some(f) = frame::alloc_frame() {
+            //printk!(Warn, "{:#x}({:#x})  ", f.number, f.start_address());
+            v.push(f);
+            i += 1;
+        }
+    }
+
+    v.sort();
+    for f in v {
+        frame::dealloc_frame(f);
+    }
+
+    printk!(Warn, "allocated/deallocated #{} frames\n\r", i);
+}
